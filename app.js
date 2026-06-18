@@ -9,26 +9,58 @@
  *    with in-memory fallbacks so it can never throw in a sandbox/preview.
  * ------------------------------------------------------------------------- */
 const KEY = 'barcount.v2';
+const SNAPKEY = 'barcount.snaps';
 const memState = new Map();
+
+function rawGet(k) { try { const v = localStorage.getItem(k); if (v != null) return v; } catch (e) {} return memState.has(k) ? memState.get(k) : null; }
+function rawSet(k, v) { try { localStorage.setItem(k, v); return true; } catch (e) { memState.set(k, v); return false; } }
+function validShape(s) { return s && typeof s === 'object' && s.settings && Array.isArray(s.days); }
+
+let recoveredFrom = null;   // ISO time of the snapshot we recovered from (banner on boot)
+let lastSnapAt = 0;
+function readSnaps() { const r = rawGet(SNAPKEY); if (!r) return []; try { const a = JSON.parse(r); return Array.isArray(a) ? a : []; } catch (e) { return []; } }
+function pushSnapshot(raw, force) {
+  const now = Date.now();
+  if (!force && now - lastSnapAt < 300000) return; // at most ~ every 5 min
+  lastSnapAt = now;
+  let snaps = readSnaps();
+  // de-dupe: skip if identical to the newest snapshot
+  if (snaps.length && snaps[snaps.length - 1].raw === raw) return;
+  snaps.push({ t: new Date().toISOString(), raw });
+  while (snaps.length > 10) snaps.shift();
+  // best-effort write; on quota, trim oldest and retry a few times
+  let ok = rawSet(SNAPKEY, JSON.stringify(snaps));
+  let guard = 0;
+  while (!ok && snaps.length > 1 && guard++ < 12) { snaps.shift(); ok = rawSet(SNAPKEY, JSON.stringify(snaps)); }
+}
+function newestSnapshot() {
+  const snaps = readSnaps();
+  for (let i = snaps.length - 1; i >= 0; i--) { try { const s = JSON.parse(snaps[i].raw); if (validShape(s)) return { t: snaps[i].t, state: s, raw: snaps[i].raw }; } catch (e) {} }
+  return null;
+}
 
 const store = {
   load() {
-    try {
-      const raw = localStorage.getItem(KEY);
-      if (raw) return JSON.parse(raw);
-    } catch (e) { /* fall through */ }
-    try {
-      const raw = memState.get(KEY);
-      if (raw) return JSON.parse(raw);
-    } catch (e) { /* ignore */ }
+    const raw = rawGet(KEY);
+    if (raw != null) {
+      try { const s = JSON.parse(raw); if (validShape(s)) return s; } catch (e) {}
+      // The main key is unreadable/corrupt: DON'T silently reset to blank.
+      // Preserve the bad bytes, then recover the newest good snapshot.
+      try { rawSet(KEY + '.corrupt', raw); } catch (e) {} // one bounded copy of the bad bytes
+      const snap = newestSnapshot();
+      if (snap) { rawSet(KEY, snap.raw); recoveredFrom = snap.t; return snap.state; } // heal the live key now
+      try { rawSet(KEY, JSON.stringify(defaultState())); } catch (e) {} // no snapshot: heal to blank so we don't re-stash every launch
+    }
     return null;
   },
   save(state) {
     let raw;
     try { raw = JSON.stringify(state); } catch (e) { return; }
-    try { localStorage.setItem(KEY, raw); }
-    catch (e) { memState.set(KEY, raw); }
+    const ok = rawSet(KEY, raw);
+    if (ok) pushSnapshot(raw, false); // don't grow the snapshot blob if the primary write hit quota
   },
+  checkpoint() { pushSnapshot(rawGet(KEY) || '', true); },   // force a restore point now
+  snapshots() { return readSnaps(); },
 };
 
 /* Photos -> IndexedDB, with an in-memory Map fallback. Returns ids; getPhoto -> dataURL */
@@ -136,14 +168,15 @@ const POUR_MAP_DEFAULT = {
 function defaultState() {
   return {
     schema: 2,
-    device: { name: '', role: null, kiosk: false },
+    device: { name: '', role: null, kiosk: false, id: uid(), bootMilestone: 0, bootMilestoneDate: '' },
     settings: {
       event: "Reno Rodeo '26",
-      numStations: 4,
+      numStations: 5,
       nights: 10,
       drinks: DRINKS.slice(),
       drinkPrices: DRINK_PRICES.slice(),
       beer: BEER_DEFAULT.slice(),
+      tipEst: 3,           // assumed $ raised per person served (live boot meter)
       catalog: CATALOG_DEFAULT.map((c) => ({ ...c })),
       pours: POURS_DEFAULT.map((p) => ({ ...p })),
       pourMap: JSON.parse(JSON.stringify(POUR_MAP_DEFAULT)),
@@ -155,7 +188,7 @@ function defaultState() {
     days: [],            // manager: merged nights
     currentDayId: null,  // manager: selected night
     myShifts: [],        // bartender: this phone's shifts
-    myDoor: { buckets: {}, total: 0, log: [] }, // door: this phone's count
+    myDoor: { buckets: {}, total: 0, taps: [] }, // door: this phone's count
   };
 }
 
@@ -168,9 +201,22 @@ function migrate(s) {
   out.settings = Object.assign({}, d.settings, s.settings || {});
   out.settings.boot = Object.assign({}, d.settings.boot, (s.settings && s.settings.boot) || {});
   if (!out.settings.adminPin) out.settings.adminPin = d.settings.adminPin; // always keep a manager PIN set
+  if (!out.device.id) out.device.id = uid();                                // stable per-phone id (door merge)
   out.days = Array.isArray(s.days) ? s.days : [];
+  out.days.forEach((day) => {
+    if (!Array.isArray(day.doorPhones)) day.doorPhones = [];
+    // Preserve a pre-existing (legacy/demo) door count as a baseline phone so the first
+    // additive door import doesn't wipe it.
+    if (!day.doorPhones.length && day.door && (day.door.total || Object.keys(day.door.buckets || {}).length)) {
+      day.doorPhones.push({ id: 'legacy-door', name: 'Door', total: day.door.total || 0, buckets: day.door.buckets || {} });
+    }
+    // Keep tips sized to the station count so every reader (Excel, leaderboard, recap) is consistent.
+    if (Array.isArray(day.tips)) { for (let i = day.tips.length; i < out.settings.numStations; i++) day.tips.push({ station: i + 1, bucketTotal: 0, verified: false, verifiedBy: '' }); }
+  });
   out.myShifts = Array.isArray(s.myShifts) ? s.myShifts : [];
-  out.myDoor = Object.assign({ buckets: {}, total: 0, log: [] }, s.myDoor || {});
+  out.myShifts.forEach((sh) => { if (!Array.isArray(sh.servedTaps)) sh.servedTaps = []; });
+  out.myDoor = Object.assign({ buckets: {}, total: 0, taps: [] }, s.myDoor || {});
+  if (!Array.isArray(out.myDoor.taps)) out.myDoor.taps = [];
   return out;
 }
 
@@ -181,7 +227,7 @@ const save = () => store.save(S);
  * 2. Small helpers
  * ------------------------------------------------------------------------- */
 const app = () => document.getElementById('app');
-const uid = () => 'x' + Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-3);
+function uid() { return 'x' + Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-3); } // hoisted: used at module-init by defaultState()
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const sum = (a) => a.reduce((x, y) => x + (Number(y) || 0), 0);
 const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
@@ -368,8 +414,8 @@ route('#/join/bartender', renderJoin);
  * ------------------------------------------------------------------------- */
 function activeShift() { return S.myShifts.find((x) => x.active) || null; }
 function newShift(station, mixer) {
-  return { id: uid(), station, mixer: mixer || '', start: nowMin(), end: null, active: true,
-    drinks: S.settings.drinks.map(() => 0), served: 0, buckets: {}, streak: 0, _curStreak: 0, _lastTap: -999, log: [] };
+  return { id: uid(), station, mixer: mixer || '', date: todayISO(), start: nowMin(), end: null, active: true,
+    drinks: S.settings.drinks.map(() => 0), served: 0, buckets: {}, servedTaps: [], streak: 0, _curStreak: 0, _lastTap: -999, log: [] };
 }
 
 function renderStart(root) {
@@ -425,6 +471,10 @@ function renderCount(root) {
         <div class="counter-num" id="served">${sh.served}</div>
         <button class="pm pm--tan" id="sPlus">+</button>
       </div>
+      <div class="boot-strip" title="Estimated, from people served">
+        <div class="bs-bar"><div class="bs-fill" id="bsFill"></div></div>
+        <div class="bs-lbl" id="bsLbl"></div>
+      </div>
     </div>
     <div class="drink-grid">${cells}</div>
     <div class="count-foot">
@@ -437,16 +487,35 @@ function renderCount(root) {
   const $ = (s) => root.querySelector(s);
   const refreshServed = () => { $('#served').textContent = sh.served; };
   const refreshDrink = (i) => { root.querySelector(`[data-c="${i}"]`).textContent = sh.drinks[i]; $('#stot').textContent = shiftTotal(sh); };
+  if (!Array.isArray(sh.servedTaps)) sh.servedTaps = [];
+
+  // Personal boot meter — estimated $ raised TONIGHT (this shift's date) from people served.
+  const tonight = sh.date || todayISO();
+  if (S.device.bootMilestoneDate !== tonight) { S.device.bootMilestone = 0; S.device.bootMilestoneDate = tonight; }
+  const myServedTonight = () => sum(S.myShifts.filter((s) => (s.date || tonight) === tonight).map((s) => s.served || 0));
+  const refreshBoot = () => {
+    const raised = myServedTonight() * (S.settings.tipEst || 0);
+    $('#bsLbl').textContent = `~${usd(raised)} for the kids 🤠`;
+    $('#bsFill').style.width = ((raised % 100) / 100 * 100).toFixed(0) + '%';
+  };
 
   $('#sPlus').onclick = () => {
-    sh.served++; const b = bucketOf(nowMin()); sh.buckets[b] = (sh.buckets[b] || 0) + 1;
-    refreshServed(); save();
+    sh.served++; const b = bucketOf(nowMin()); sh.buckets[b] = (sh.buckets[b] || 0) + 1; sh.servedTaps.push(b);
+    refreshServed(); refreshBoot();
+    // milestone toast every $100 raised tonight
+    const m = Math.floor(myServedTonight() * (S.settings.tipEst || 0) / 100);
+    if (m > (S.device.bootMilestone || 0)) { S.device.bootMilestone = m; toast(`🤠 ~${usd(m * 100)} raised for the kids!`); }
+    save();
   };
   $('#sMinus').onclick = () => {
     if (sh.served <= 0) return;
-    sh.served--; const b = bucketOf(nowMin()); if (sh.buckets[b]) { sh.buckets[b]--; if (!sh.buckets[b]) delete sh.buckets[b]; }
-    refreshServed(); save();
+    sh.served--;
+    // undo the bucket the LAST +1 actually landed in (not just the current clock bucket)
+    const b = sh.servedTaps.length ? sh.servedTaps.pop() : bucketOf(nowMin());
+    if (sh.buckets[b]) { sh.buckets[b]--; if (!sh.buckets[b]) delete sh.buckets[b]; }
+    refreshServed(); refreshBoot(); save();
   };
+  refreshBoot();
 
   // drinks: add-only, combo badge on rapid taps, streak tracking
   const comboState = {}; // i -> {n, t}
@@ -508,7 +577,7 @@ function renderEndMove(root) {
     <button class="btn" id="move">Move to another station</button>
     <button class="btn ghost" id="cancel">Cancel</button>
   </section>`;
-  root.querySelector('#end').onclick = () => { sh.end = nowMin(); sh.active = false; save(); go('#/qr'); };
+  root.querySelector('#end').onclick = () => { sh.end = nowMin(); sh.active = false; save(); store.checkpoint(); go('#/qr'); };
   root.querySelector('#move').onclick = () => {
     const ns = S.settings.numStations;
     const segs = Array.from({ length: ns }, (_, i) => `<button class="s" data-st="${i + 1}">${i + 1}</button>`).join('');
@@ -530,14 +599,24 @@ function renderEndMove(root) {
 route('#/endmove', renderEndMove);
 
 /* ---------- QR payload (compact) ---------- */
+// Integrity checksum — recomputed on import to reject a garbled/partial scan.
+function payloadChecksum(p) {
+  if (p.r === 'b') return (p.s || []).reduce((a, sh) => a + sum(sh.d || []) + sum(Object.values(sh.b || {})), 0);
+  if (p.r === 'd') return (p.t || 0) + sum(Object.values(p.b || {}));
+  return 0;
+}
 function bartenderPayload() {
-  return {
+  const p = {
     v: 1, r: 'b', n: S.device.name, ev: S.settings.event,
     s: S.myShifts.map((sh) => ({ st: sh.station, mx: sh.mixer, a: sh.start, e: sh.end, d: sh.drinks, b: sh.buckets, k: sh.streak })),
   };
+  p.c = payloadChecksum(p);
+  return p;
 }
 function doorPayload() {
-  return { v: 1, r: 'd', n: S.device.name || 'Door', ev: S.settings.event, b: S.myDoor.buckets, t: S.myDoor.total };
+  const p = { v: 1, r: 'd', n: S.device.name || 'Door', ev: S.settings.event, id: S.device.id, b: S.myDoor.buckets, t: S.myDoor.total };
+  p.c = payloadChecksum(p);
+  return p;
 }
 
 function makeQRSvg(text) {
@@ -575,6 +654,7 @@ route('#/qr', renderQR);
  * ------------------------------------------------------------------------- */
 function renderDoor(root) {
   const d = S.myDoor;
+  if (!Array.isArray(d.taps)) d.taps = [];
   root.innerHTML = `
   <section class="screen door">
     <div class="topbar"><span class="mono">DOOR · LINE</span><span class="mono">OFFLINE ✓</span></div>
@@ -595,8 +675,8 @@ function renderDoor(root) {
     const cur = bucketOf(nowMin()); const n = d.buckets[cur] || 0;
     rate.textContent = n ? `${n} in this 15-min block` : '';
   };
-  root.querySelector('#dPlus').onclick = () => { d.total++; const b = bucketOf(nowMin()); d.buckets[b] = (d.buckets[b] || 0) + 1; d.log.push(Date.now()); num.textContent = d.total; showRate(); save(); };
-  root.querySelector('#dMinus').onclick = () => { if (d.total <= 0) return; d.total--; const b = bucketOf(nowMin()); if (d.buckets[b]) { d.buckets[b]--; if (!d.buckets[b]) delete d.buckets[b]; } num.textContent = d.total; showRate(); save(); };
+  root.querySelector('#dPlus').onclick = () => { d.total++; const b = bucketOf(nowMin()); d.buckets[b] = (d.buckets[b] || 0) + 1; d.taps.push(b); num.textContent = d.total; showRate(); save(); };
+  root.querySelector('#dMinus').onclick = () => { if (d.total <= 0) return; d.total--; const b = d.taps.length ? d.taps.pop() : bucketOf(nowMin()); if (d.buckets[b]) { d.buckets[b]--; if (!d.buckets[b]) delete d.buckets[b]; } num.textContent = d.total; showRate(); save(); };
   root.querySelector('#qr').onclick = () => go('#/qr');
   showRate();
 }
@@ -616,6 +696,7 @@ function newDay(dayNum, date) {
     id: uid(), day: dayNum, date: date || todayISO(),
     shifts: [],        // merged: {person, role, station, mixer, start, end, drinks[], served, buckets{}, streak}
     door: { buckets: {}, total: 0 },
+    doorPhones: [],    // multiple door phones, summed: [{id, name, total, buckets}]
     inventory: S.settings.catalog.map((c) => ({ name: c.name, opening: 0, closing: 0 })),
     order: { items: S.settings.catalog.map((c) => ({ name: c.name, unitPrice: c.unitPrice, recommendedQty: c.recommendedQty, orderedQty: 0 })), photoId: null, total: 0 },
     receiving: [],
@@ -623,6 +704,13 @@ function newDay(dayNum, date) {
     bootAmount: null,  // null = auto from tips
     imported: [],      // labels of imported phones
   };
+}
+// Re-derive day.door from all door phones so existing reads (funnel etc.) keep working.
+function recomputeDoor(day) {
+  const phones = day.doorPhones || [];
+  const buckets = {}; let total = 0;
+  phones.forEach((ph) => { total += ph.total || 0; for (const k in (ph.buckets || {})) buckets[k] = (buckets[k] || 0) + ph.buckets[k]; });
+  day.door = { total, buckets };
 }
 function ensureDay() {
   if (!currentDay()) { const d = newDay(S.days.length + 1); S.days.push(d); S.currentDayId = d.id; save(); }
@@ -657,6 +745,40 @@ function bootCumulativeThrough(day) {
   let total = 0;
   for (const d of S.days) { total += bootForDay(d); if (d.id === day.id) break; }
   return total;
+}
+// Live pace vs last year (idea #9)
+function paceInfo() {
+  const raised = sum(S.days.map((d) => bootForDay(d)));
+  const elapsed = S.days.length;
+  const nights = S.settings.nights || 10;
+  const remaining = Math.max(0, nights - elapsed);
+  const lastYear = ((S.settings.boot.pastYears || [])[0] || {}).total || S.settings.boot.goal || 0;
+  const perNight = elapsed ? raised / elapsed : 0;
+  const projected = perNight * nights;
+  const ahead = lastYear ? projected >= lastYear : false;
+  const needPerNight = remaining ? Math.max(0, (lastYear - raised) / remaining) : 0;
+  return { raised, elapsed, nights, remaining, lastYear, perNight, projected, ahead, needPerNight };
+}
+function paceBanner() {
+  const p = paceInfo();
+  if (!p.elapsed || !p.lastYear) return '';
+  if (p.ahead) return `<div class="pace ahead">🔥 On pace for ~${usd(p.projected)} — AHEAD of last year (${usd(p.lastYear)})</div>`;
+  return `<div class="pace behind">Behind last year — need ~${usd(p.needPerNight)}/night for ${p.remaining} more night${p.remaining === 1 ? '' : 's'} to beat ${usd(p.lastYear)}</div>`;
+}
+// Tonight's plain-English brief (idea #10)
+function tonightBrief(day) {
+  const out = [];
+  const t = dayTotals(day);
+  const sp = sparkline(dayServedBuckets(day), 15);
+  if (sp.peak != null) out.push({ text: `Busiest 15-min: ${minToLabel(sp.peak)} (${sp.peakVal} served)`, hash: '#/m/analytics' });
+  const stArr = Object.values(stationAgg(day)).filter((s) => sum(s.drinks) > 0);
+  if (stArr.length && t.drinks) { const top = stArr.slice().sort((a, b) => sum(b.drinks) - sum(a.drinks))[0]; out.push({ text: `Station ${top.station} carried ${Math.round(sum(top.drinks) / t.drinks * 100)}% of drinks`, hash: '#/m/analytics' }); }
+  if (t.line) out.push({ text: `Conversion ${Math.round(t.conv * 100)}% · ${t.dpp.toFixed(1)} drinks/person`, hash: '#/m/analytics' });
+  const low = (day.inventory || []).filter((it) => (it.opening || it.closing) && (it.closing || 0) <= 2);
+  if (low.length) out.push({ text: `Low stock: ${low.map((l) => l.name).slice(0, 3).join(', ')}`, hash: '#/m/orders' });
+  const p = paceInfo();
+  if (p.elapsed && p.lastYear) out.push({ text: p.ahead ? `Ahead of last year — projecting ~${usd(p.projected)}` : `Need ~${usd(p.needPerNight)}/night to catch last year`, hash: '#/m/boot' });
+  return out.slice(0, 4);
 }
 /* combine 15-min buckets bar-wide for a day -> {min: count} */
 function dayServedBuckets(day) {
@@ -731,12 +853,14 @@ function renderManagerHub(root) {
         <div><div class="lbl">Tonight</div><b>Day ${d.day} · ${d.date}</b></div>
         <button class="chip" id="newNight">+ New night</button>
       </div>
+      ${paceBanner()}
       <div class="kpis">
         <div class="kpi"><div class="kn">${t.line}</div><div class="kl">line</div></div>
         <div class="kpi"><div class="kn">${t.served}</div><div class="kl">served</div></div>
         <div class="kpi"><div class="kn">${t.drinks}</div><div class="kl">drinks</div></div>
         <div class="kpi"><div class="kn">${usd(t.tipsTotal)}</div><div class="kl">tips</div></div>
       </div>
+      ${(function () { const b = tonightBrief(d); return b.length ? `<div class="brief"><div class="lbl">Tonight's brief</div>${b.map((x) => `<button class="brief-line" data-bh="${x.hash}">› ${esc(x.text)}</button>`).join('')}</div>` : ''; })()}
       <div class="hub-grid">
         ${cards.map(([h, ic, ti, su]) => `<button class="hub-card" data-h="${h}"><span class="hc-ic">${ic}</span><span class="hc-ti">${ti}</span><span class="hc-su">${su}</span></button>`).join('')}
       </div>
@@ -744,6 +868,7 @@ function renderManagerHub(root) {
     <nav class="tabbar">${MTABS.map((tt) => `<button class="t ${tt.k === 'more' ? 'on' : ''}" data-h="${tt.hash}">${tt.label}</button>`).join('')}</nav>
   </section>`;
   root.querySelectorAll('.hub-card').forEach((c) => c.onclick = () => go(c.dataset.h));
+  root.querySelectorAll('.brief-line').forEach((b) => b.onclick = () => go(b.dataset.bh));
   root.querySelectorAll('.tabbar .t').forEach((t2) => t2.onclick = () => go(t2.dataset.h));
   const sel = root.querySelector('#nightSel'); if (sel) sel.onchange = () => { S.currentDayId = sel.value; save(); render(); };
   root.querySelector('#newNight').onclick = () => {
@@ -760,22 +885,81 @@ route('#/manager', renderManagerHub);
 /* ---------------------------------------------------------------------------
  * 8. Import (06) — photo-scan QR + merge by station
  * ------------------------------------------------------------------------- */
-function mergePayload(day, p) {
-  if (!p || !p.r) { toast('Not a valid Bar Count QR'); return false; }
+const importUndo = []; // session-only stack of pre-merge snapshots, for one-tap undo
+
+function validatePayload(p) {
+  if (!p || typeof p !== 'object' || (p.r !== 'b' && p.r !== 'd')) return "This isn't a Bar Count QR.";
+  if (p.r === 'b' && !Array.isArray(p.s)) return 'QR is missing shift data — retake the photo.';
+  if (p.c != null && p.c !== payloadChecksum(p)) return 'QR came through garbled — retake a clearer, closer photo.';
+  return null;
+}
+
+// Show a confirmation/preview before committing a scan (catches wrong-night / collision).
+function previewMerge(day, p) {
+  const err = validatePayload(p);
+  if (err) { toast(err); return; }
+  const go2 = () => showPreviewSheet(day, p);
+  if (p.ev && p.ev !== S.settings.event) {
+    confirmSheet('Different event?', `This QR says "${p.ev}", not "${S.settings.event}". Import it anyway?`, 'Import', go2);
+  } else go2();
+}
+function showPreviewSheet(day, p) {
+  let body, isUpdate;
   if (p.r === 'd') {
-    day.door = { buckets: p.b || {}, total: p.t || 0 };
-    day.imported = day.imported.filter((l) => l !== 'Door').concat('Door');
-    return true;
+    const id = p.id || ('door-' + (p.n || 'door'));
+    isUpdate = (day.doorPhones || []).some((x) => x.id === id);
+    body = `<div class="lrow"><span>🚪 ${esc(p.n || 'Door')}</span><span class="v">${p.t || 0} in line</span></div>`;
+  } else {
+    isUpdate = day.shifts.some((x) => x.person === p.n);
+    body = (p.s || []).map((sh) => `<div class="lrow"><span>Sta ${sh.st} · ${minToLabel(sh.a)}–${sh.e != null ? minToLabel(sh.e) : 'open'}</span><span class="v">${sum(Object.values(sh.b || {}))} served · ${sum(sh.d || [])} dr</span></div>`).join('');
   }
-  if (p.r === 'b') {
+  const tag = isUpdate ? '<span class="tan">UPDATE</span>' : '<span class="ok">NEW</span>';
+  const w = sheet(`<h3 class="sh-h">${esc(p.n || 'Door')} · ${tag}</h3>
+    <p class="muted">${isUpdate ? 'Already imported — this replaces their numbers.' : 'New phone — adds to tonight.'}</p>
+    <div class="rows">${body}</div>
+    <div class="row2"><button class="btn" id="pc">Cancel</button><button class="btn btn--go" id="pk">${isUpdate ? 'Update' : 'Import'}</button></div>`);
+  w.querySelector('#pc').onclick = closeSheet;
+  w.querySelector('#pk').onclick = () => { applyMerge(day, p); closeSheet(); toast((isUpdate ? 'Updated ' : 'Imported ') + (p.n || 'Door')); render(); };
+}
+
+function applyMerge(day, p) {
+  // snapshot the day so the merge can be undone in one tap
+  importUndo.push({
+    dayId: day.id,
+    prevShifts: JSON.parse(JSON.stringify(day.shifts)),
+    prevDoorPhones: JSON.parse(JSON.stringify(day.doorPhones || [])),
+    prevDoor: JSON.parse(JSON.stringify(day.door || {})),
+    prevImported: (day.imported || []).slice(),
+  });
+  if (importUndo.length > 20) importUndo.shift();
+  if (p.r === 'd') {
+    day.doorPhones = day.doorPhones || [];
+    const id = p.id || ('door-' + (p.n || 'door'));
+    const entry = { id, name: p.n || 'Door', total: p.t || 0, buckets: p.b || {} };
+    const ex = day.doorPhones.find((x) => x.id === id);
+    if (ex) Object.assign(ex, entry); else day.doorPhones.push(entry);
+    recomputeDoor(day);
+    // door display is driven by day.doorPhones (the single source of truth) — no fragile label bookkeeping
+  } else {
     (p.s || []).forEach((sh) => {
       const exists = day.shifts.find((x) => x.person === p.n && x.start === sh.a && x.station === sh.st);
-      if (exists) Object.assign(exists, { mixer: sh.mx, end: sh.e, drinks: sh.d, served: sum(Object.values(sh.b || {})), buckets: sh.b || {}, streak: sh.k || 0 });
-      else day.shifts.push({ id: uid(), person: p.n, role: 'bartender', station: sh.st, mixer: sh.mx || '', start: sh.a, end: sh.e, drinks: sh.d || [], served: sum(Object.values(sh.b || {})), buckets: sh.b || {}, streak: sh.k || 0 });
+      const data = { mixer: sh.mx || '', end: sh.e, drinks: sh.d || [], served: sum(Object.values(sh.b || {})), buckets: sh.b || {}, streak: sh.k || 0 };
+      if (exists) Object.assign(exists, data);
+      else day.shifts.push(Object.assign({ id: uid(), person: p.n, role: 'bartender', station: sh.st, start: sh.a }, data));
     });
     const label = `${p.n} → Sta ${(p.s || []).map((x) => x.st).join('/')}`;
-    day.imported = day.imported.filter((l) => !l.startsWith(p.n + ' ')).concat(label);
-    return true;
+    day.imported = (day.imported || []).filter((l) => !l.startsWith(p.n + ' ')).concat(label);
+  }
+  save(); store.checkpoint();
+}
+
+function undoLastImport(day) {
+  for (let i = importUndo.length - 1; i >= 0; i--) {
+    if (importUndo[i].dayId === day.id) {
+      const u = importUndo.splice(i, 1)[0];
+      day.shifts = u.prevShifts; day.doorPhones = u.prevDoorPhones; day.door = u.prevDoor; day.imported = u.prevImported;
+      save(); store.checkpoint(); return true;
+    }
   }
   return false;
 }
@@ -799,17 +983,31 @@ function decodeImageFile(file, cb) {
 function renderImport(root) {
   ensureDay();
   const d = currentDay();
-  const rows = d.imported.length
-    ? d.imported.map((l) => `<div class="lrow"><span>${esc(l)}</span><span class="v ok">✓ in</span></div>`).join('')
-    : '<p class="muted">No phones imported yet. Tap “Snap a QR”.</p>';
+  const agg = stationAgg(d);
+  const covered = (st) => agg[st] && (agg[st].served > 0 || agg[st].shifts.length > 0);
+  const stationCells = Array.from({ length: S.settings.numStations }, (_, i) => i + 1)
+    .map((st) => `<div class="cov ${covered(st) ? 'on' : ''}">Sta ${st}${covered(st) ? ' ✓' : ''}</div>`).join('');
+  const doorOK = d.door && d.door.total > 0;
+  const doorCell = `<div class="cov ${doorOK ? 'on' : ''}">Door${doorOK ? ' ✓' : ''}</div>`;
+  const missing = Array.from({ length: S.settings.numStations }, (_, i) => i + 1).filter((st) => !covered(st)).length + (doorOK ? 0 : 1);
+
+  const shiftRows = d.shifts.length
+    ? d.imported.filter((l) => !l.startsWith('🚪')).map((l) => `<div class="lrow"><span>${esc(l)}</span><span class="v ok">✓ in</span></div>`).join('')
+    : '';
+  const doorRows = (d.doorPhones || []).map((ph) => `<div class="lrow"><span>🚪 ${esc(ph.name)}</span><span class="v">${ph.total} in line <button class="lnk" data-rmdoor="${esc(ph.id)}">✕</button></span></div>`).join('');
+  const haveUndo = importUndo.some((u) => u.dayId === d.id);
+
   const inner = `
-    <p class="muted">Photograph each phone's QR. Merges by station automatically.</p>
-    <div class="rows">${rows}</div>
+    <p class="muted">Photograph each phone's QR. You'll see a preview before it merges.</p>
+    <div class="lbl">Coverage — ${missing ? missing + ' still out' : 'all in ✓'}</div>
+    <div class="coverage">${stationCells}${doorCell}</div>
     <label class="btn btn--tan filein">📷 Snap a QR
       <input type="file" accept="image/*" capture="environment" id="qrfile" hidden>
     </label>
     <button class="btn ghost" id="paste">Paste backup code</button>
-    <p class="muted small">Imported into Day ${d.day}. Re-scanning a phone updates its numbers.</p>`;
+    ${haveUndo ? '<button class="btn ghost" id="undoImp">↩ Undo last import</button>' : ''}
+    ${shiftRows || doorRows ? `<div class="lbl">Imported</div><div class="rows">${shiftRows}${doorRows}</div>` : '<p class="muted small">Nothing imported yet.</p>'}
+    <p class="muted small">Day ${d.day}. Re-scanning a phone updates it; multiple door phones add together.</p>`;
   root.innerHTML = managerShell('import', 'Import', inner);
   wireShell(root);
   root.querySelector('#qrfile').onchange = (e) => {
@@ -818,20 +1016,30 @@ function renderImport(root) {
     decodeImageFile(f, (data) => {
       if (!data) { toast('No QR found — try a clearer, closer photo'); return; }
       let p; try { p = JSON.parse(data); } catch (err) { toast('QR is not Bar Count data'); return; }
-      if (mergePayload(d, p)) { save(); toast('Imported ' + (p.n || '')); render(); }
+      previewMerge(d, p);
     });
     e.target.value = '';
   };
   root.querySelector('#paste').onclick = () => {
     const w = sheet(`<h3 class="sh-h">Paste backup code</h3><p class="muted">Paste the code copied from a phone's Show-QR screen.</p>
       <textarea class="inp ta" id="pc" placeholder="{...}"></textarea>
-      <div class="row2"><button class="btn" id="x">Cancel</button><button class="btn btn--go" id="ok">Import</button></div>`);
+      <div class="row2"><button class="btn" id="x">Cancel</button><button class="btn btn--go" id="ok">Preview</button></div>`);
     w.querySelector('#x').onclick = closeSheet;
     w.querySelector('#ok').onclick = () => {
       let p; try { p = JSON.parse(w.querySelector('#pc').value.trim()); } catch (e) { return toast('Invalid code'); }
-      if (mergePayload(d, p)) { save(); closeSheet(); toast('Imported'); render(); }
+      closeSheet(); previewMerge(d, p);
     };
   };
+  const undoBtn = root.querySelector('#undoImp');
+  if (undoBtn) undoBtn.onclick = () => { if (undoLastImport(d)) { toast('Undid last import'); render(); } };
+  root.querySelectorAll('[data-rmdoor]').forEach((b) => b.onclick = () => {
+    const id = b.dataset.rmdoor;
+    confirmSheet('Remove door phone?', 'Removes this door phone from tonight and re-sums the line count.', 'Remove', () => {
+      d.doorPhones = (d.doorPhones || []).filter((x) => x.id !== id);
+      recomputeDoor(d);
+      save(); render();
+    });
+  });
 }
 route('#/m/import', renderImport);
 
@@ -1296,6 +1504,7 @@ function renderBoot(root) {
       <div class="bar"><div class="bar-fill" style="width:${clamp(pct, 0, 100)}%"></div></div>
       <div class="mut">${pct}% of ${usd(goal)} goal · ${esc(S.settings.boot.cause)}</div>
     </div>
+    ${paceBanner()}
     <div class="rows">${dayRows}</div>
     <p class="muted small">Tonight auto-suggests from tips — type to override. Numbers only; your boot graphic/file renders the visual.</p>
     <button class="btn ghost" id="resetBoot">Reset tonight to auto</button>`;
@@ -1367,26 +1576,64 @@ function exportNightlyCSV() {
  * ------------------------------------------------------------------------- */
 function renderHistory(root) {
   const rows = S.days.length ? S.days.map((d) => { const t = dayTotals(d); return `<div class="lrow"><span>Day ${d.day} — ${d.date}</span><span class="v">${t.drinks} dr · ${usd(t.tipsTotal)}</span></div>`; }).join('') : '<p class="muted">No nights yet.</p>';
+  const snaps = store.snapshots();
+  const snapRows = snaps.length
+    ? snaps.slice().reverse().map((s, i) => {
+      let lbl = '';
+      try { const st = JSON.parse(s.raw); lbl = `${(st.days || []).length} night${(st.days || []).length === 1 ? '' : 's'}`; } catch (e) { lbl = '—'; }
+      const time = new Date(s.t); const hhmm = time.toLocaleString();
+      return `<div class="lrow"><span>${esc(hhmm)} <span class="mut">· ${lbl}</span></span><button class="chip" data-snap="${snaps.length - 1 - i}">Restore</button></div>`;
+    }).join('')
+    : '<p class="muted small">No restore points yet — they accrue as you work.</p>';
   const inner = `
     <h2 class="title-sm">History — ${S.days.length} night${S.days.length === 1 ? '' : 's'}</h2>
     <div class="rows">${rows}</div>
     <button class="btn btn--tan" id="backup">⤓ Backup (export JSON)</button>
     <label class="btn filein">⤒ Restore (import JSON)<input type="file" accept="application/json,.json" id="restore" hidden></label>
+    <div class="lbl">Auto restore points (on-device)</div>
+    <div class="rows">${snapRows}</div>
     <button class="btn ghost" id="demo">Load demo night (for testing)</button>
-    <p class="muted small">Backup includes all nights, settings, and photos. Keep one off-device each night.</p>`;
+    <p class="muted small">Backup includes all nights, settings, and photos. Keep one off-device each night. Restore points are kept automatically on this phone as a safety net.</p>`;
   root.innerHTML = managerShell('more', 'History + Backup', inner);
   wireShell(root);
   root.querySelector('#backup').onclick = exportBackup;
   root.querySelector('#restore').onchange = (e) => { const f = e.target.files && e.target.files[0]; if (f) importBackup(f); e.target.value = ''; };
   root.querySelector('#demo').onclick = () => confirmSheet('Load demo night?', 'Adds one fully-populated night so you can see analytics, leaderboard, and exports. You can delete it via Restore.', 'Load demo', () => { loadDemo(); render(); });
+  root.querySelectorAll('[data-snap]').forEach((b) => b.onclick = () => {
+    const idx = Number(b.dataset.snap); const snap = store.snapshots()[idx];
+    if (!snap) return;
+    confirmSheet('Restore this point?', `Replaces current data with the ${new Date(snap.t).toLocaleString()} save. A backup downloads first.`, 'Restore', () => {
+      exportBackup();
+      try { const st = JSON.parse(snap.raw); if (validShape(st)) { S = migrate(st); save(); toast('Restored'); render(); } else toast('That restore point is unreadable'); } catch (e) { toast('That restore point is unreadable'); }
+    });
+  });
 }
 route('#/m/history', renderHistory);
 
 async function exportBackup() {
+  // Capture the state SYNCHRONOUSLY up front — callers (guarded reset, snapshot restore) reassign S
+  // right after, and photoDB.all() awaits, so reading S post-await would back up the wrong state.
+  let stateSnap; try { stateSnap = JSON.parse(JSON.stringify(S)); } catch (e) { stateSnap = S; }
   const photos = await photoDB.all();
-  const backup = { app: 'bar-count', schema: 2, exportedAt: new Date().toISOString(), state: S, photos };
+  const backup = { app: 'bar-count', schema: 2, exportedAt: new Date().toISOString(), state: stateSnap, photos };
   downloadBlob(new Blob([JSON.stringify(backup)], { type: 'application/json' }), `barcount-backup-${todayISO()}.json`);
   toast('Backup downloaded');
+}
+
+// Idea #1 — Guarded reset: force a backup, type RESET, then PIN, before wiping.
+function guardedReset() {
+  exportBackup(); // downloads a full JSON first
+  const w = sheet(`<h3 class="sh-h">Erase this phone?</h3>
+    <p class="muted">A full backup just downloaded. This wipes <b>all nights, settings, and counts</b> on this phone — it can't be undone without that backup. Type <b>RESET</b> to confirm.</p>
+    <input class="inp" id="rt" placeholder="Type RESET" autocomplete="off" autocapitalize="characters">
+    <div class="row2"><button class="btn" id="rc">Cancel</button><button class="btn btn--go" id="rk">Erase</button></div>`);
+  w.querySelector('#rc').onclick = closeSheet;
+  w.querySelector('#rk').onclick = () => {
+    if (w.querySelector('#rt').value.trim().toUpperCase() !== 'RESET') { toast('Type RESET to confirm'); return; }
+    closeSheet();
+    askPin('Enter PIN to erase this phone', () => { S = defaultState(); save(); toast('Phone reset — backup was downloaded'); go(''); });
+  };
+  setTimeout(() => { const el = w.querySelector('#rt'); if (el) el.focus(); }, 50);
 }
 function importBackup(file) {
   const r = new FileReader();
@@ -1415,6 +1662,7 @@ function renderSettings(root) {
       <label class="inp-lbl">Number of nights</label><input class="inp" id="sNights" type="number" min="1" value="${st.nights}">
       <label class="inp-lbl">Boot goal $ (beat last year)</label><input class="inp" id="sGoal" type="number" value="${st.boot.goal}">
       <label class="inp-lbl">Cause</label><input class="inp" id="sCause" value="${esc(st.boot.cause)}">
+      <label class="inp-lbl">Boot-meter est. $ per person served</label><input class="inp" id="sTipEst" type="number" inputmode="decimal" value="${st.tipEst}">
     </div>
     <div class="set-grp">
       <div class="lbl">9-drink grid (comma-separated)</div>
@@ -1451,6 +1699,7 @@ function renderSettings(root) {
     st.nights = Math.max(1, Number(root.querySelector('#sNights').value) || 10);
     st.boot.goal = Number(root.querySelector('#sGoal').value) || 0;
     st.boot.cause = root.querySelector('#sCause').value.trim() || st.boot.cause;
+    st.tipEst = Number(root.querySelector('#sTipEst').value) || 0;
     const drinks = root.querySelector('#sDrinks').value.split(',').map((s) => s.trim()).filter(Boolean);
     if (drinks.length) st.drinks = drinks;
     st.drinkPrices = root.querySelector('#sPrices').value.split(',').map((s) => Number(s.trim()) || 0);
@@ -1462,7 +1711,7 @@ function renderSettings(root) {
     st.adminPin = root.querySelector('#sPin').value.trim();
     save(); toast('Settings saved'); render();
   };
-  root.querySelector('#reset').onclick = () => confirmSheet('Reset this phone?', 'Clears the role and all data ON THIS PHONE. Export a backup first if unsure.', 'Reset', () => { S = defaultState(); save(); go(''); });
+  root.querySelector('#reset').onclick = guardedReset;
 }
 route('#/m/settings', renderSettings);
 
@@ -1675,8 +1924,9 @@ function loadDemo() {
     mk('Pat', 4, 'Lou', 19 * 60 + 15, 21 * 60, dv({ 'Jack & Coke': 9, 'Jack & Diet Coke': 3, 'Specialty Drink': 7, 'Margaritas': 11, 'Wine': 5, 'Coors Regular': 18, 'Coors Light': 22, 'Blue Moon': 9, 'Cocktail': 4 }), [8, 11, 13, 9, 7, 6], 6),
   ];
   const servedTotal = sum(day.shifts.map((s) => s.served));
-  // Door a bit above total served (so conversion reads < 100%).
-  day.door = { total: Math.round(servedTotal * 1.25), buckets: mkBuckets(19 * 60, 120, [30, 52, 70, 58, 48, 40, 30, 22]) };
+  // Door a bit above total served (so conversion reads < 100%). Use doorPhones so the demo is additive-safe.
+  day.doorPhones = [{ id: 'door-demo', name: 'Door', total: Math.round(servedTotal * 1.25), buckets: mkBuckets(19 * 60, 120, [30, 52, 70, 58, 48, 40, 30, 22]) }];
+  recomputeDoor(day);
   // Inventory consistent with pours, so shrinkage is ~0 except one intentionally-flagged item.
   const drinkTotals = S.settings.drinks.map((_, i) => sum(day.shifts.map((s) => (s.drinks || [])[i] || 0)));
   const expected = {};
@@ -1709,4 +1959,5 @@ route('#/manager', renderManagerHub);
     window.addEventListener('load', () => navigator.serviceWorker.register('service-worker.js').catch(() => {}));
   }
   render();
+  if (recoveredFrom) { setTimeout(() => toast(`Recovered your data from ${new Date(recoveredFrom).toLocaleString()}`), 400); }
 })();

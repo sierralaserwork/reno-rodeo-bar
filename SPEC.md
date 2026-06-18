@@ -150,3 +150,26 @@ The Team Recap screen (18) keeps **SMS** and **Copy** and adds **Email**:
 - **Settings** gains `teamEmails` (recap email recipients) alongside the team phone list, plus
   `drinkPrices` (revenue estimate), `beer` (which grid drinks are beer), `pourMap`
   (drink → liquor oz, for shrinkage), and `nights`.
+
+## 8. Reliability & game-day enhancements (v2.4)
+- **Drink grid order**: row 1 Jack & Coke · Jack & Diet Coke · Cocktail; row 2 Margaritas ·
+  Specialty Drink · Wine; row 3 Coors Light · Coors Regular · Blue Moon. Default stations = **5**.
+- **Auto-snapshots + self-heal**: every save also writes a throttled ring of recent state snapshots
+  (`barcount.snaps`). If the main key is ever unreadable, `load()` recovers the newest valid snapshot
+  (and preserves the corrupt bytes) instead of resetting to blank; a banner notes the recovery.
+  History lists on-device restore points.
+- **Guarded reset**: "Reset this phone" forces a backup download, then requires typing `RESET` and the
+  admin PIN before wiping.
+- **Import preview + coverage board + undo**: scans show a NEW/UPDATE preview before merging; a grid of
+  all stations + Door shows who's still out; one-tap undo of the last import.
+- **Payload integrity**: QR payloads carry a checksum (`c`); a garbled/partial scan is rejected. A QR
+  whose event name differs prompts before importing.
+- **Multi-door merge**: door phones carry a device `id` and are summed (`day.doorPhones`), so a second
+  door phone adds to the line count instead of overwriting it; a contributor can be removed.
+- **Accurate "−"**: the served and door minus buttons undo the 15-min bucket the last `+1` landed in
+  (a `servedTaps`/`taps` stack), not the current clock bucket.
+- **Personal boot meter**: the count screen shows estimated $ raised tonight (people served ×
+  `settings.tipEst`, default $3), with a milestone toast every $100.
+- **Pace banner**: manager hub + boot screen show ahead/behind last year and $/night needed to catch up.
+- **Tonight's brief**: a manager-hub card auto-summarizing busiest 15-min, top station, conversion,
+  low stock, and pace — each line jumps to its screen.

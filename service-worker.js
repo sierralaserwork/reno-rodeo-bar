@@ -1,6 +1,6 @@
 // service-worker.js — cache-first so the app runs fully offline after first load.
 // Bump CACHE whenever you change app files or vendored libs.
-const CACHE = 'barcount-v4';
+const CACHE = 'barcount-v5';
 const PRECACHE = [
   '.',
   'index.html',
