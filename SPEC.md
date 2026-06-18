@@ -152,8 +152,11 @@ The Team Recap screen (18) keeps **SMS** and **Copy** and adds **Email**:
   (drink → liquor oz, for shrinkage), and `nights`.
 
 ## 8. Reliability & game-day enhancements (v2.4)
-- **Drink grid order**: row 1 Jack & Coke · Jack & Diet Coke · Cocktail; row 2 Margaritas ·
-  Specialty Drink · Wine; row 3 Coors Light · Coors Regular · Blue Moon. Default stations = **5**.
+- **Drink grid order** (v2.6): row 1 Jack & Coke · Jack & Diet Coke · Specialty Drink; row 2 Cocktail ·
+  Wine · Margaritas; row 3 Blue Moon · Coors Regular · Coors Light. Default stations = **5**.
+  Default tip goal = **$28,444.42**. A one-time `defaultsVersion` migration brings existing phones to
+  this drink order (remapping any recorded counts BY NAME so data isn't misaligned) and goal.
+  All numeric Settings fields tolerate commas/`$` (e.g. `28,444.42` parses correctly).
 - **Auto-snapshots + self-heal**: every save also writes a throttled ring of recent state snapshots
   (`barcount.snaps`). If the main key is ever unreadable, `load()` recovers the newest valid snapshot
   (and preserves the corrupt bytes) instead of resetting to blank; a banner notes the recovery.

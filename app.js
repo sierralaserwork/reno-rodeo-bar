@@ -127,14 +127,14 @@ const photoDB = (() => {
  * 1. Defaults + state
  * ------------------------------------------------------------------------- */
 // Grid is 3-wide, so this order sets the rows:
-//   row 1: Jack & Coke · Jack & Diet Coke · Cocktail
-//   row 2: Margaritas · Specialty Drink · Wine
-//   row 3: Coors Light · Coors Regular · Blue Moon
-const DRINKS = ['Jack & Coke', 'Jack & Diet Coke', 'Cocktail',
-  'Margaritas', 'Specialty Drink', 'Wine',
-  'Coors Light', 'Coors Regular', 'Blue Moon'];
+//   row 1 (top):    Jack & Coke · Jack & Diet Coke · Specialty Drink
+//   row 2 (middle): Cocktail · Wine · Margaritas
+//   row 3 (bottom): Blue Moon · Coors Regular · Coors Light
+const DRINKS = ['Jack & Coke', 'Jack & Diet Coke', 'Specialty Drink',
+  'Cocktail', 'Wine', 'Margaritas',
+  'Blue Moon', 'Coors Regular', 'Coors Light'];
 const BEER_DEFAULT = ['Coors Regular', 'Coors Light', 'Blue Moon'];
-const DRINK_PRICES = [9, 9, 10, 11, 12, 8, 6, 6, 7]; // aligned to DRINKS order above
+const DRINK_PRICES = [9, 9, 12, 10, 8, 11, 7, 6, 6]; // aligned to DRINKS order above
 
 const CATALOG_DEFAULT = [
   { name: "Jack Daniel's", unitPrice: 42, recommendedQty: 3 },
@@ -179,10 +179,11 @@ function defaultState() {
       catalog: CATALOG_DEFAULT.map((c) => ({ ...c })),
       pours: POURS_DEFAULT.map((p) => ({ ...p })),
       pourMap: JSON.parse(JSON.stringify(POUR_MAP_DEFAULT)),
-      boot: { goal: 41500, cause: 'Special Kids Rodeo', pastYears: [{ year: 2024, total: 41500 }, { year: 2023, total: 37400 }] },
+      boot: { goal: 28444.42, cause: 'Special Kids Rodeo', pastYears: [{ year: 2024, total: 41500 }, { year: 2023, total: 37400 }] },
       teamPhones: [],
       teamEmails: [],
       adminPin: '4296',
+      defaultsVersion: 3,
     },
     days: [],            // manager: merged nights
     currentDayId: null,  // manager: selected night
@@ -216,6 +217,28 @@ function migrate(s) {
   out.myShifts.forEach((sh) => { if (!Array.isArray(sh.servedTaps)) sh.servedTaps = []; if (typeof sh.date !== 'string') sh.date = ''; });
   out.myDoor = Object.assign({ buckets: {}, total: 0, taps: [] }, s.myDoor || {});
   if (!Array.isArray(out.myDoor.taps)) out.myDoor.taps = [];
+
+  // One-time defaults refresh for phones created before this version (runs once).
+  // Read the version from the SAVED state — out.settings inherits defaultState's version via Object.assign.
+  const savedDefaultsVersion = (s.settings && s.settings.defaultsVersion) || 0;
+  if (savedDefaultsVersion < 3) {
+    const old = out.settings.drinks;
+    const sameSet = Array.isArray(old) && old.length === DRINKS.length
+      && DRINKS.every((n) => old.indexOf(n) !== -1) && old.every((n) => DRINKS.indexOf(n) !== -1);
+    if (sameSet) {
+      // Remap any existing counts BY NAME so reordering the grid can't misalign data.
+      const srcIdx = DRINKS.map((n) => old.indexOf(n)); // new position i pulls from old position srcIdx[i]
+      const remap = (arr) => (Array.isArray(arr) ? DRINKS.map((_, i) => arr[srcIdx[i]] || 0) : arr);
+      out.days.forEach((day) => (day.shifts || []).forEach((sh) => { sh.drinks = remap(sh.drinks); }));
+      out.myShifts.forEach((sh) => { sh.drinks = remap(sh.drinks); });
+      out.settings.drinks = DRINKS.slice();
+      out.settings.drinkPrices = (Array.isArray(out.settings.drinkPrices) && out.settings.drinkPrices.length === DRINKS.length)
+        ? remap(out.settings.drinkPrices) : DRINK_PRICES.slice();
+    }
+    // Adopt the new fundraising goal unless the manager set a custom one (old default was 41500; 0 = comma-bug zero).
+    if (out.settings.boot.goal === 41500 || !out.settings.boot.goal) out.settings.boot.goal = 28444.42;
+    out.settings.defaultsVersion = 3;
+  }
   return out;
 }
 
@@ -230,6 +253,7 @@ function uid() { return 'x' + Math.random().toString(36).slice(2, 9) + Date.now(
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const sum = (a) => a.reduce((x, y) => x + (Number(y) || 0), 0);
 const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
+const num = (v) => { const n = parseFloat(String(v == null ? '' : v).replace(/[^0-9.\-]/g, '')); return isNaN(n) ? 0 : n; }; // tolerant of commas / $ / spaces
 const isIOS = () => /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
 function usd(n, dec = 0) {
@@ -1719,7 +1743,7 @@ function renderSettings(root) {
       <label class="inp-lbl">Event name</label><input class="inp" id="sEvent" value="${esc(st.event)}">
       <label class="inp-lbl">Number of stations</label><input class="inp" id="sStations" type="number" min="1" max="12" value="${st.numStations}">
       <label class="inp-lbl">Number of nights</label><input class="inp" id="sNights" type="number" min="1" value="${st.nights}">
-      <label class="inp-lbl">Boot goal $ (beat last year)</label><input class="inp" id="sGoal" type="number" value="${st.boot.goal}">
+      <label class="inp-lbl">Tip goal $ (what we're shooting for)</label><input class="inp" id="sGoal" type="text" inputmode="decimal" value="${st.boot.goal}">
       <label class="inp-lbl">Cause</label><input class="inp" id="sCause" value="${esc(st.boot.cause)}">
     </div>
     <div class="set-grp">
@@ -1753,16 +1777,16 @@ function renderSettings(root) {
   wireShell(root);
   root.querySelector('#saveSet').onclick = () => {
     st.event = root.querySelector('#sEvent').value.trim() || st.event;
-    st.numStations = clamp(Number(root.querySelector('#sStations').value) || 4, 1, 12);
-    st.nights = Math.max(1, Number(root.querySelector('#sNights').value) || 10);
-    st.boot.goal = Number(root.querySelector('#sGoal').value) || 0;
+    st.numStations = clamp(num(root.querySelector('#sStations').value) || 4, 1, 12);
+    st.nights = Math.max(1, num(root.querySelector('#sNights').value) || 10);
+    st.boot.goal = num(root.querySelector('#sGoal').value) || st.boot.goal; // comma/$ tolerant; keep prior if blank
     st.boot.cause = root.querySelector('#sCause').value.trim() || st.boot.cause;
     const drinks = root.querySelector('#sDrinks').value.split(',').map((s) => s.trim()).filter(Boolean);
     if (drinks.length) st.drinks = drinks;
-    st.drinkPrices = root.querySelector('#sPrices').value.split(',').map((s) => Number(s.trim()) || 0);
+    st.drinkPrices = root.querySelector('#sPrices').value.split(',').map((s) => num(s));
     st.beer = root.querySelector('#sBeer').value.split(',').map((s) => s.trim()).filter(Boolean);
-    st.catalog = root.querySelector('#sCatalog').value.split('\n').map((l) => l.split(',')).filter((p) => p[0] && p[0].trim()).map((p) => ({ name: p[0].trim(), unitPrice: Number(p[1]) || 0, recommendedQty: Number(p[2]) || 0 }));
-    st.pours = root.querySelector('#sPours').value.split('\n').map((l) => l.split(',')).filter((p) => p[0] && p[0].trim()).map((p) => ({ item: p[0].trim(), pourOz: Number(p[1]) || 0, bottleOz: Number(p[2]) || 0 }));
+    st.catalog = root.querySelector('#sCatalog').value.split('\n').map((l) => l.split(',')).filter((p) => p[0] && p[0].trim()).map((p) => ({ name: p[0].trim(), unitPrice: num(p[1]), recommendedQty: num(p[2]) }));
+    st.pours = root.querySelector('#sPours').value.split('\n').map((l) => l.split(',')).filter((p) => p[0] && p[0].trim()).map((p) => ({ item: p[0].trim(), pourOz: num(p[1]), bottleOz: num(p[2]) }));
     st.teamPhones = root.querySelector('#sPhones').value.split(',').map((s) => s.trim()).filter(Boolean);
     st.teamEmails = root.querySelector('#sEmails').value.split(',').map((s) => s.trim()).filter(Boolean);
     st.adminPin = root.querySelector('#sPin').value.trim();
