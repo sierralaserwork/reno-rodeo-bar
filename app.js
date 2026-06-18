@@ -145,7 +145,7 @@ function defaultState() {
       boot: { goal: 41500, cause: 'Special Kids Rodeo', pastYears: [{ year: 2024, total: 41500 }, { year: 2023, total: 37400 }] },
       teamPhones: [],
       teamEmails: [],
-      adminPin: '',
+      adminPin: '4296',
     },
     days: [],            // manager: merged nights
     currentDayId: null,  // manager: selected night
@@ -162,6 +162,7 @@ function migrate(s) {
   out.device = Object.assign({}, d.device, s.device || {});
   out.settings = Object.assign({}, d.settings, s.settings || {});
   out.settings.boot = Object.assign({}, d.settings.boot, (s.settings && s.settings.boot) || {});
+  if (!out.settings.adminPin) out.settings.adminPin = d.settings.adminPin; // always keep a manager PIN set
   out.days = Array.isArray(s.days) ? s.days : [];
   out.myShifts = Array.isArray(s.myShifts) ? s.myShifts : [];
   out.myDoor = Object.assign({ buckets: {}, total: 0, log: [] }, s.myDoor || {});
@@ -258,12 +259,30 @@ const routes = {};
 function route(hash, fn) { routes[hash] = fn; }
 function go(hash) { if (location.hash === hash) render(); else location.hash = hash; }
 
+let mgrUnlocked = false; // manager PIN entered this session
+function gateManager(root) {
+  root.innerHTML = `
+  <section class="screen">
+    <div class="barx"><span class="mono">MANAGER</span><span class="mono">🔒 locked</span></div>
+    <p class="eyebrow">Reno Rodeo · Special Kids Rodeo</p>
+    <h1 class="h1">Manager PIN</h1>
+    <p class="muted">Enter the manager PIN to open the manager tools.</p>
+    <button class="btn btn--go big" id="enter">Enter PIN</button>
+    <button class="btn ghost" id="back">‹ Back to roles</button>
+  </section>`;
+  const ask = () => askPin('Enter manager PIN', () => { mgrUnlocked = true; render(); });
+  root.querySelector('#enter').onclick = ask;
+  root.querySelector('#back').onclick = () => go('');
+  ask();
+}
 function render() {
   closeSheet();
   const root = app(); root.innerHTML = '';
   const hash = location.hash || '';
   // Role gate
   if (!S.device.role && hash !== '' && hash !== '#/') { return renderRolePicker(root); }
+  // Manager PIN gate — every manager route ('#/manager', '#/m/...') is behind the PIN.
+  if (hash.indexOf('#/m') === 0 && S.settings.adminPin && !mgrUnlocked) { return gateManager(root); }
   let fn = routes[hash];
   if (!fn) {
     // default by role
@@ -282,6 +301,7 @@ window.addEventListener('hashchange', render);
  * 4. Screen 00 — Role picker
  * ------------------------------------------------------------------------- */
 function renderRolePicker(root) {
+  mgrUnlocked = false; // re-require the manager PIN on the next manager entry
   root.innerHTML = `
   <section class="screen">
     <div class="barx"><span class="mono">OFFLINE ✓</span><span class="mono">${esc(S.settings.event)}</span></div>
