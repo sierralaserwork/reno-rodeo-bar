@@ -94,10 +94,15 @@ const photoDB = (() => {
 /* ---------------------------------------------------------------------------
  * 1. Defaults + state
  * ------------------------------------------------------------------------- */
-const DRINKS = ['Jack & Coke', 'Jack & Diet Coke', 'Specialty Drink', 'Margaritas', 'Wine',
-  'Coors Regular', 'Coors Light', 'Blue Moon', 'Cocktail'];
+// Grid is 3-wide, so this order sets the rows:
+//   row 1: Jack & Coke · Jack & Diet Coke · Cocktail
+//   row 2: Margaritas · Specialty Drink · Wine
+//   row 3: Coors Light · Coors Regular · Blue Moon
+const DRINKS = ['Jack & Coke', 'Jack & Diet Coke', 'Cocktail',
+  'Margaritas', 'Specialty Drink', 'Wine',
+  'Coors Light', 'Coors Regular', 'Blue Moon'];
 const BEER_DEFAULT = ['Coors Regular', 'Coors Light', 'Blue Moon'];
-const DRINK_PRICES = [9, 9, 12, 11, 8, 6, 6, 7, 10];
+const DRINK_PRICES = [9, 9, 10, 11, 12, 8, 6, 6, 7]; // aligned to DRINKS order above
 
 const CATALOG_DEFAULT = [
   { name: "Jack Daniel's", unitPrice: 42, recommendedQty: 3 },
@@ -279,8 +284,9 @@ function render() {
   closeSheet();
   const root = app(); root.innerHTML = '';
   const hash = location.hash || '';
-  // Role gate
-  if (!S.device.role && hash !== '' && hash !== '#/') { return renderRolePicker(root); }
+  // Role gate — an unset role goes to the picker, EXCEPT the public join landing (#/join),
+  // which IS the onboarding screen a freshly-scanned phone should see.
+  if (!S.device.role && hash !== '' && hash !== '#/' && hash.indexOf('#/join') !== 0) { return renderRolePicker(root); }
   // Manager PIN gate — every manager route ('#/manager', '#/m/...') is behind the PIN.
   if (hash.indexOf('#/m') === 0 && S.settings.adminPin && !mgrUnlocked) { return gateManager(root); }
   let fn = routes[hash];
@@ -330,6 +336,32 @@ function renderRolePicker(root) {
 }
 route('', renderRolePicker);
 route('#/', renderRolePicker);
+
+/* Public bartender onboarding — opened by scanning the staff QR (#/join). */
+function renderJoin(root) {
+  root.innerHTML = `
+  <section class="screen">
+    <div class="barx"><span class="mono">JOIN THE BAR</span><span class="mono">${esc(S.settings.event)}</span></div>
+    <p class="eyebrow">Reno Rodeo · Special Kids Rodeo</p>
+    <h1 class="h1">You're on the bar team 🍸</h1>
+    <p class="muted">Type your name to start counting your shift. This phone is just you.</p>
+    <label class="inp-lbl">Your name</label>
+    <input class="inp" id="jnm" placeholder="Type your name" value="${esc(S.device.name)}" autocomplete="name" enterkeyhint="go">
+    <button class="btn btn--go big" id="joinBtn">Start as Bartender ▸</button>
+    <p class="muted small center">Working the door, or the manager? <button class="lnk" id="other">Pick a different role</button></p>
+  </section>`;
+  const start = () => {
+    const name = root.querySelector('#jnm').value.trim();
+    if (!name) { toast('Type your name first'); root.querySelector('#jnm').focus(); return; }
+    S.device.name = name; S.device.role = 'bartender'; save();
+    go(S.myShifts.some((x) => x.active) ? '#/count' : '#/start');
+  };
+  root.querySelector('#joinBtn').onclick = start;
+  root.querySelector('#jnm').addEventListener('keydown', (e) => { if (e.key === 'Enter') start(); });
+  root.querySelector('#other').onclick = () => go('');
+}
+route('#/join', renderJoin);
+route('#/join/bartender', renderJoin);
 
 /* ---------------------------------------------------------------------------
  * 5. Bartender — shift model + screens 01–04
@@ -672,6 +704,7 @@ function renderManagerHub(root) {
   const d = currentDay();
   const t = dayTotals(d);
   const cards = [
+    ['#/m/onboard', '🔗', 'Staff QR', 'Bartenders scan to join'],
     ['#/m/import', '📷', 'Import', 'Scan phone QRs'],
     ['#/m/inventory', '🧮', 'Inventory', 'Opening/closing bottles'],
     ['#/m/orders', '📝', 'Orders', 'Catalog + recommended'],
@@ -801,6 +834,28 @@ function renderImport(root) {
   };
 }
 route('#/m/import', renderImport);
+
+/* Staff onboarding QR — a URL QR that opens the app to bartender sign-up (#/join). */
+function joinURL() { return location.href.split('#')[0] + '#/join'; }
+function renderOnboard(root) {
+  const url = joinURL();
+  const svg = makeQRSvg(url);
+  const inner = `
+    <h2 class="title-sm">Bartenders: scan to join</h2>
+    <p class="muted">Each bartender points their phone camera at this code. It opens the app, they type
+      their name, and they're counting — no app store, no typing a link.</p>
+    <div class="qr-box">${svg || '<p class="muted">QR unavailable.</p>'}</div>
+    <p class="muted center small">${esc(url)}</p>
+    <button class="btn btn--tan" id="copy">Copy link</button>
+    <button class="btn ghost" id="open">Open it on this phone (preview)</button>
+    <p class="muted small">Tip: screenshot or print this and tape it at each station. Works on any phone
+      — they just need internet the first time it loads, then it runs offline.</p>`;
+  root.innerHTML = managerShell('more', 'Staff QR', inner);
+  wireShell(root);
+  root.querySelector('#copy').onclick = () => copyText(url);
+  root.querySelector('#open').onclick = () => go('#/join');
+}
+route('#/m/onboard', renderOnboard);
 
 /* ---------------------------------------------------------------------------
  * 9. Inventory (07)
@@ -1609,13 +1664,15 @@ function loadDemo() {
   if (!day || day.shifts.length || (day.door && day.door.total)) { day = newDay(S.days.length + 1); S.days.push(day); }
   S.currentDayId = day.id;
   const mkBuckets = (start, mins, shape) => { const b = {}; const n = Math.max(1, Math.round(mins / 15)); for (let i = 0; i < n; i++) { const k = bucketOf(start + i * 15); b[k] = shape[i % shape.length]; } return b; };
+  // counts keyed by drink name so the demo is robust to any grid reorder
+  const dv = (m) => S.settings.drinks.map((n) => m[n] || 0);
   const mk = (person, station, mixer, start, end, drinks, shape, streak) => { const buckets = mkBuckets(start, end - start, shape); return { id: uid(), person, role: 'bartender', station, mixer, start, end, drinks, served: sum(Object.values(buckets)), buckets, streak }; };
   day.shifts = [
-    mk('Jane', 1, 'Tom', 19 * 60, 19 * 60 + 55, [22, 9, 14, 31, 12, 40, 55, 18, 7], [10, 14, 18, 12], 9),
-    mk('Mae', 1, 'Tom', 19 * 60 + 55, 21 * 60, [10, 4, 6, 12, 5, 20, 25, 8, 3], [8, 12, 10, 6], 5),
-    mk('Carlos', 2, 'Rita', 19 * 60, 21 * 60, [18, 7, 20, 28, 9, 33, 40, 14, 11], [14, 20, 24, 16, 12, 10, 8, 6], 7),
-    mk('Dee', 3, 'Sam', 19 * 60 + 30, 21 * 60, [12, 5, 9, 15, 7, 22, 28, 10, 6], [9, 13, 15, 10], 4),
-    mk('Pat', 4, 'Lou', 19 * 60 + 15, 21 * 60, [9, 3, 7, 11, 5, 18, 22, 9, 4], [8, 11, 13, 9, 7, 6], 6),
+    mk('Jane', 1, 'Tom', 19 * 60, 19 * 60 + 55, dv({ 'Jack & Coke': 22, 'Jack & Diet Coke': 9, 'Specialty Drink': 14, 'Margaritas': 31, 'Wine': 12, 'Coors Regular': 40, 'Coors Light': 55, 'Blue Moon': 18, 'Cocktail': 7 }), [10, 14, 18, 12], 9),
+    mk('Mae', 1, 'Tom', 19 * 60 + 55, 21 * 60, dv({ 'Jack & Coke': 10, 'Jack & Diet Coke': 4, 'Specialty Drink': 6, 'Margaritas': 12, 'Wine': 5, 'Coors Regular': 20, 'Coors Light': 25, 'Blue Moon': 8, 'Cocktail': 3 }), [8, 12, 10, 6], 5),
+    mk('Carlos', 2, 'Rita', 19 * 60, 21 * 60, dv({ 'Jack & Coke': 18, 'Jack & Diet Coke': 7, 'Specialty Drink': 20, 'Margaritas': 28, 'Wine': 9, 'Coors Regular': 33, 'Coors Light': 40, 'Blue Moon': 14, 'Cocktail': 11 }), [14, 20, 24, 16, 12, 10, 8, 6], 7),
+    mk('Dee', 3, 'Sam', 19 * 60 + 30, 21 * 60, dv({ 'Jack & Coke': 12, 'Jack & Diet Coke': 5, 'Specialty Drink': 9, 'Margaritas': 15, 'Wine': 7, 'Coors Regular': 22, 'Coors Light': 28, 'Blue Moon': 10, 'Cocktail': 6 }), [9, 13, 15, 10], 4),
+    mk('Pat', 4, 'Lou', 19 * 60 + 15, 21 * 60, dv({ 'Jack & Coke': 9, 'Jack & Diet Coke': 3, 'Specialty Drink': 7, 'Margaritas': 11, 'Wine': 5, 'Coors Regular': 18, 'Coors Light': 22, 'Blue Moon': 9, 'Cocktail': 4 }), [8, 11, 13, 9, 7, 6], 6),
   ];
   const servedTotal = sum(day.shifts.map((s) => s.served));
   // Door a bit above total served (so conversion reads < 100%).
