@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bar Count + Fill the Boot — Wireframe v2</title>
+<style>
+  :root{
+    --ink:#211d1a; --ink-2:#5b544c; --paper:#ffffff; --wash:#f3efe8;
+    --line:#cdc6ba; --line-2:#e4ded4; --tan:#b56a25; --tan-wash:#f6e9d6;
+    --shadow:0 1px 0 #d8d1c5, 0 14px 28px -22px rgba(33,29,26,.5);
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0;background:var(--wash);color:var(--ink);font-family:var(--sans);line-height:1.5;
+    background-image:radial-gradient(var(--line-2) 1px,transparent 1px);
+    background-size:22px 22px;background-position:-1px -1px;}
+  .wrap{max-width:1180px;margin:0 auto;padding:28px 18px 64px}
+  .mast{border:2px solid var(--ink);background:var(--paper);box-shadow:var(--shadow);
+    padding:22px 22px 20px;border-radius:6px;position:relative;overflow:hidden}
+  .eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:var(--tan);margin:0 0 8px}
+  .mast h1{font-size:clamp(24px,5.4vw,42px);line-height:1.04;margin:0;letter-spacing:-.02em;font-weight:800}
+  .mast h1 em{font-style:normal;color:var(--ink-2);font-weight:500}
+  .mast .sub{font-family:var(--mono);font-size:12px;color:var(--ink-2);margin-top:12px;letter-spacing:.02em}
+  .mast .boot{position:absolute;right:-6px;bottom:-10px;width:128px;height:auto;opacity:.14}
+  @media(max-width:560px){.mast .boot{display:none}}
+  .legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin-top:16px;font-family:var(--mono);font-size:11px;color:var(--ink-2)}
+  .legend span{display:inline-flex;align-items:center;gap:7px}
+  .swatch{width:22px;height:12px;border:1.5px solid var(--ink);display:inline-block;border-radius:2px}
+  .swatch.dash{border-style:dashed;background:var(--paper)}
+  .swatch.fill{background:var(--tan);border-color:var(--tan)}
+  .swatch.solid{background:var(--paper)}
+  .band{margin-top:40px}
+  .band-head{display:flex;align-items:baseline;gap:14px;margin:0 0 16px;border-bottom:2px solid var(--ink);padding-bottom:8px}
+  .band-no{font-family:var(--mono);font-size:12px;color:var(--tan);font-weight:700;letter-spacing:.1em}
+  .band-head h2{font-size:clamp(17px,3.4vw,23px);margin:0;font-weight:800;letter-spacing:-.01em}
+  .band-head .who{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--ink-2);text-transform:uppercase;letter-spacing:.14em}
+  .screens{display:grid;grid-template-columns:repeat(auto-fill,minmax(212px,1fr));gap:26px 20px;align-items:start}
+  figure{margin:0}
+  .phone{border:2px solid var(--ink);border-radius:24px;background:var(--paper);box-shadow:var(--shadow);padding:9px;transition:transform .18s ease}
+  @media(hover:hover){.phone:hover{transform:translateY(-3px)}}
+  .notch{height:14px;display:flex;justify-content:center;align-items:center}
+  .notch::before{content:"";width:46px;height:5px;border-radius:4px;background:var(--line)}
+  .scr{border:1px solid var(--line);border-radius:15px;background:var(--paper);min-height:280px;padding:11px;display:flex;flex-direction:column;gap:8px;overflow:hidden}
+  .cap{margin:10px 2px 0;font-family:var(--mono);font-size:11px;color:var(--ink-2);letter-spacing:.02em}
+  .cap b{color:var(--ink);font-weight:700}
+  .cap .n{color:var(--tan)}
+  .barx{display:flex;justify-content:space-between;align-items:center;font-family:var(--mono);font-size:9px;color:var(--ink-2);letter-spacing:.04em}
+  .sticky{border:1.5px solid var(--ink);border-radius:9px;background:var(--tan-wash);padding:9px}
+  .sticky .lbl{font-family:var(--mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--tan)}
+  .counter{display:flex;align-items:center;justify-content:space-between;margin-top:4px}
+  .pm{width:34px;height:34px;border:1.6px solid var(--ink);border-radius:8px;display:grid;place-items:center;font-weight:800;font-size:18px;background:var(--paper)}
+  .bignum{font-size:30px;font-weight:800;letter-spacing:-.02em}
+  .chip{font-family:var(--mono);font-size:9px;border:1.4px solid var(--line);border-radius:20px;padding:3px 8px;color:var(--ink-2);background:var(--paper);white-space:nowrap}
+  .chip.k{border-color:var(--ink);color:var(--ink)}
+  .chip.tan{border-color:var(--tan);color:var(--tan)}
+  .lead{font-family:var(--mono);font-size:9px;color:var(--ink-2);letter-spacing:.04em;margin:1px 0 -2px}
+  .g9{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;flex:1}
+  .cell{border:1.4px solid var(--ink);border-radius:8px;background:var(--paper);position:relative;display:flex;flex-direction:column;justify-content:space-between;padding:6px 5px;min-height:42px}
+  .cell .dn{font-size:9px;font-weight:700;line-height:1.05}
+  .cell .ct{font-family:var(--mono);font-size:11px;color:var(--ink-2);align-self:flex-end}
+  .cell .badge{position:absolute;top:-7px;right:-6px;background:var(--tan);color:#fff;font-family:var(--mono);font-weight:700;font-size:9px;border-radius:9px;padding:2px 6px;box-shadow:0 2px 6px -2px rgba(181,106,37,.8)}
+  .btn{border:1.6px solid var(--ink);border-radius:9px;padding:8px;text-align:center;font-weight:700;font-size:11px;background:var(--paper)}
+  .btn.go{background:var(--ink);color:#fff}
+  .btn.tan{background:var(--tan);border-color:var(--tan);color:#fff}
+  .btn.sm{font-size:10px;padding:6px}
+  .field{border:1.4px dashed var(--line);border-radius:8px;padding:7px 9px;font-family:var(--mono);font-size:10px;color:var(--ink-2);background:#fcfaf6}
+  .field b{color:var(--ink)}
+  .seg{display:flex;gap:5px}
+  .seg .s{flex:1;border:1.4px solid var(--line);border-radius:7px;text-align:center;font-size:9px;padding:5px 2px;font-family:var(--mono);color:var(--ink-2)}
+  .seg .s.on{border-color:var(--ink);color:var(--ink);font-weight:700;background:var(--tan-wash)}
+  .rows{display:flex;flex-direction:column;gap:5px}
+  .lrow{display:flex;justify-content:space-between;align-items:center;border-bottom:1px dotted var(--line);padding-bottom:5px;font-size:10px;gap:6px}
+  .lrow .v{font-family:var(--mono);color:var(--ink-2);white-space:nowrap}
+  .lrow .box{width:34px;height:16px;border:1.3px dashed var(--line);border-radius:4px;flex:none}
+  .ph{flex:1;border:1.4px dashed var(--line);border-radius:8px;background:#fcfaf6;display:grid;place-items:center;font-family:var(--mono);font-size:10px;color:var(--ink-2);min-height:54px;text-align:center}
+  .tabbar{display:flex;gap:3px;border-top:1.5px solid var(--ink);padding-top:7px;margin-top:auto}
+  .tabbar .t{flex:1;text-align:center;font-family:var(--mono);font-size:8px;color:var(--ink-2);letter-spacing:.02em}
+  .tabbar .t.on{color:var(--tan);font-weight:700}
+  .title-sm{font-weight:800;font-size:12px;letter-spacing:-.01em}
+  .mut{font-family:var(--mono);font-size:9px;color:var(--ink-2);letter-spacing:.03em}
+  .notes{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-top:20px}
+  .note{border:1.5px solid var(--ink);border-left-width:5px;border-radius:6px;background:var(--paper);padding:13px 14px;box-shadow:var(--shadow)}
+  .note h4{margin:0 0 5px;font-size:12px;font-family:var(--mono);letter-spacing:.04em;text-transform:uppercase}
+  .note p{margin:0;font-size:13px;color:var(--ink-2)}
+  .note.k{border-left-color:var(--tan)}
+  .note.k h4{color:var(--tan)}
+  .flow{border:2px solid var(--ink);border-radius:6px;background:var(--paper);box-shadow:var(--shadow);margin-top:40px;padding:20px}
+  .flow h3{margin:0 0 14px;font-size:13px;font-family:var(--mono);letter-spacing:.16em;text-transform:uppercase;color:var(--tan)}
+  .flowline{display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-family:var(--mono);font-size:12px}
+  .node{border:1.5px solid var(--ink);border-radius:7px;padding:7px 11px;background:#fcfaf6;font-weight:700;font-size:11px}
+  .node.tan{background:var(--tan);color:#fff;border-color:var(--tan)}
+  .arr{color:var(--tan);font-weight:800}
+  footer{margin-top:40px;font-family:var(--mono);font-size:11px;color:var(--ink-2);border-top:1px solid var(--line);padding-top:16px}
+  footer b{color:var(--ink)}
+  @media (prefers-reduced-motion: reduce){.phone{transition:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="mast">
+    <p class="eyebrow">Reno Rodeo · Bar Ops · Special Kids Rodeo</p>
+    <h1>Bar Count <em>+</em> Fill the Boot<br><em>app wireframe</em></h1>
+    <p class="sub">low-fidelity screen map · v2.2 · phone-first · fully offline · one person per phone · QR handoff</p>
+    <div class="legend">
+      <span><i class="swatch solid"></i> screen element</span>
+      <span><i class="swatch dash"></i> input / placeholder</span>
+      <span><i class="swatch fill"></i> key interaction</span>
+      <span><i class="swatch" style="background:var(--tan-wash);border-color:var(--tan)"></i> sticky / always-visible</span>
+    </div>
+    <svg class="boot" viewBox="0 0 110 120" aria-hidden="true"><path d="M34 6 H62 V64 C62 70 64 72 70 73 L94 78 C100 79 104 84 104 92 V104 C104 110 100 114 94 114 H42 C36 114 32 110 32 104 V20 C32 12 33 6 34 6 Z" fill="none" stroke="var(--ink)" stroke-width="3"/></svg>
+  </header>
+
+  <!-- 0 -->
+  <section class="band">
+    <div class="band-head"><span class="band-no">00</span><h2>Open the app</h2><span class="who">Every phone</span></div>
+    <div class="screens">
+      <figure>
+        <div class="phone"><div class="notch"></div><div class="scr">
+          <div class="barx"><span>9:41</span><span>OFFLINE ✓</span></div>
+          <div class="title-sm">Who’s on this phone?</div>
+          <p class="mut">Your name + role, set once. Each phone = one person.</p>
+          <div class="field">Your name — <b>type it</b></div>
+          <div class="btn">🍸 &nbsp;Bartender</div>
+          <div class="btn">🚪 &nbsp;Door / Line</div>
+          <div class="btn">🛠 &nbsp;Manager</div>
+        </div></div>
+        <figcaption class="cap"><span class="n">00 ·</span> <b>Who you are.</b> One file, one person per phone.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <!-- A -->
+  <section class="band">
+    <div class="band-head"><span class="band-no">A</span><h2>Bartender phone — your shift</h2><span class="who">One per person</span></div>
+    <div class="screens">
+
+      <figure>
+        <div class="phone"><div class="notch"></div><div class="scr">
+          <div class="barx"><span>START SHIFT</span><span>You: Jane</span></div>
+          <div class="title-sm">Where are you working?</div>
+          <p class="lead">Pick your station</p>
+          <div class="seg"><div class="s on">1</div><div class="s">2</div><div class="s">3</div><div class="s">4</div></div>
+          <div class="field">Your mixer — <b>type name</b></div>
+          <div class="btn go">Start counting (clock starts)</div>
+        </div></div>
+        <figcaption class="cap"><span class="n">01 ·</span> <b>Start a shift.</b> Pick the station you’re on + your mixer. Stamps your check-in.</figcaption>
+      </figure>
+
+      <figure>
+        <div class="phone"><div class="notch"></div><div class="scr">
+          <div class="barx"><span>STA 1 · Jane / Tom</span><span><span style="color:var(--tan)">↩ Undo</span> · 🔒</span></div>
+          <div class="sticky">
+            <div class="lbl">People served — sticky · timestamped</div>
+            <div class="counter"><div class="pm">−</div><div class="bignum">128</div><div class="pm" style="border-color:var(--tan);color:var(--tan)">+</div></div>
+          </div>
+          <div class="g9">
+            <div class="cell"><span class="dn">Jack&nbsp;&&nbsp;Coke</span><span class="ct">22</span></div>
+            <div class="cell"><span class="dn">Jack&nbsp;Diet</span><span class="ct">9</span></div>
+            <div class="cell"><span class="dn">Specialty</span><span class="ct">14</span></div>
+            <div class="cell"><span class="badge">+3</span><span class="dn">Margarita</span><span class="ct">31</span></div>
+            <div class="cell"><span class="dn">Wine</span><span class="ct">12</span></div>
+            <div class="cell"><span class="dn">Coors Reg</span><span class="ct">40</span></div>
+            <div class="cell"><span class="dn">Coors Lt</span><span class="ct">55</span></div>
+            <div class="cell"><span class="dn">Blue Moon</span><span class="ct">18</span></div>
+            <div class="cell"><span class="dn">Cocktail</span><span class="ct">7</span></div>
+          </div>
+          <div class="barx"><span class="chip tan">End / move station</span><span class="chip k">Your shift ▸</span><span class="chip">Show QR</span></div>
+        </div></div>
+        <figcaption class="cap"><span class="n">02 ·</span> <b>Count screen (hero).</b> Counts your own shift. Sticky header never scrolls; grid is add-only with the +1/+2/+3 badge. Undo + lock up top, out of thumb range.</figcaption>
+      </figure>
+
+      <figure>
+        <div class="phone"><div class="notch"></div><div class="scr">
+          <div class="barx"><span>END / MOVE</span><span>9:55</span></div>
+          <div class="title-sm">Leaving or moving?</div>
+          <p class="mut">Stamps your check-out. Your counts ride along under Station 1. Whoever takes over counts on their own phone.</p>
+          <div class="btn go">End my shift → Show QR</div>
+          <div class="btn">Move to another station</div>
+          <div class="btn sm">Cancel</div>
+        </div></div>
+        <figcaption class="cap"><span class="n">03 ·</span> <b>End / move.</b> No phone swapping — the next bartender just starts their own shift at Station 1.</figcaption>
+      </figure>
+
+      <figure>
+        <div class="phone"><div class="notch"></div><div class="scr">
+          <div class="barx"><span>CLOSE</span><span>OFFLINE ✓</span></div>
+          <div class="title-sm">Hand off to manager</div>
+          <div class="ph" style="min-height:120px">▦ ▦ ▦<br>QR CODE<br><span style="font-size:8px">you · station · times · counts</span></div>
+          <p class="mut">Manager snaps a photo of this. No typing, no internet.</p>
+          <div class="btn sm">Backup code (fallback)</div>
+        </div></div>
+        <figcaption class="cap"><span class="n">04 ·</span> <b>Show QR.</b> Carries your name, station(s), times + counts.</figcaption>
+      </figure>
+
+    </div>
+    <div class="notes">
+      <div class="note k"><h4>No-scroll rule</h4><p>People-served header is pinned; only the 9-drink grid may move, never more than half a page.</p></div>
+      <div class="note"><h4>Undo, fat-finger-safe</h4><p>Lives in the top bar. Tap shows "Undo: Margarita", a second tap confirms.</p></div>
+      <div class="note"><h4>Kiosk lock</h4><p>🔒 locks to the count screen so no one wanders into settings; PIN to exit.</p></div>
+      <div class="note k"><h4>How handoffs merge</h4><p>Each phone counts one person’s shift, tagged to a station + time. The manager merges all phones by station, so a station split across 3 bartenders stitches into one night.</p></div>
+    </div>
+  </section>
+
+  <!-- B -->
+  <section class="band">
+    <div class="band-head"><span class="band-no">B</span><h2>Door phone — Line</h2><span class="who">One counter</span></div>
+    <div class="screens">
+      <figure>
+        <div class="phone"><div class="notch"></div><div class="scr">
+          <div class="barx"><span>DOOR · LINE</span><span>OFFLINE ✓</span></div>
+          <div class="sticky" style="flex:1;display:flex;flex-direction:column;justify-content:center">
+            <div class="lbl">People into the line · timestamped</div>
+            <div class="counter" style="margin-top:10px"><div class="pm" style="width:48px;height:48px;font-size:24px">−</div><div class="bignum" style="font-size:46px">312</div><div class="pm" style="width:48px;height:48px;font-size:24px;border-color:var(--tan);color:var(--tan)">+</div></div>
+          </div>
+          <div class="btn sm">Show QR at close</div>
+        </div></div>
+        <figcaption class="cap"><span class="n">05 ·</span> <b>Door counter.</b> Big +/−. Feeds the funnel’s top number.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <!-- C -->
+  <section class="band">
+    <div class="band-head"><span class="band-no">C</span><h2>Manager app — full control</h2><span class="who">Your phone</span></div>
+    <div class="screens">
+
+      <figure>
+        <div class="phone"><div class="notch"></div><div class="scr">
+          <div class="barx"><span>IMPORT</span><span>OFFLINE ✓</span></div>
+          <div class="title-sm">Bring in the night</div>
+          <div class="rows">
+            <div class="lrow"><span>Jane → Sta 1</span><span class="v">✓ in</span></div>
+            <div class="lrow"><span>Mae → Sta 1 (took over)</span><span class="v">✓ in</span></div>
+            <div class="lrow"><span>Carlos → Sta 2</span><span class="v" style="color:var(--tan)">waiting</span></div>
+            <div class="lrow"><span>Door</span><span class="v">✓ in</span></div>
+          </div>
+          <div class="btn tan">📷 Snap a QR</div>
+          <div class="tabbar"><span class="t on">Import</span><span class="t">Inv</span><span class="t">Order</span><span class="t">Tips</span><span class="t">More</span></div>
+        </div></div>
+        <figcaption class="cap"><span class="n">06 ·</span> <b>Import.</b> Photo-scan each phone’s QR; merges by station automatically.</figcaption>
+      </figure>
+
+      <figure>
+        <div class="phone"><div class="notch"></div><div class="scr">
+          <div class="barx"><span>INVENTORY · bottles</span><span>Day 2</span></div>
+          <div class="seg"><div class="s on">Opening</div><div class="s">Closing</div><div class="s">Used (auto)</div></div>
+          <div class="rows">
+            <div class="lrow"><span>Jack Daniel’s</span><span class="v">12 · 5 · 7</span></div>
+            <div class="lrow"><span>Tequila</span><span class="v">9 · 3 · 6</span></div>
+            <div class="lrow"><span>Triple sec / mix</span><span class="v">6 · 2 · 4</span></div>
+            <div class="lrow"><span>Wine</span><span class="v">8 · 3 · 5</span></div>
+            <div class="lrow"><span>Specialty base</span><span class="v">4 · 1 · 3</span></div>
+          </div>
+          <div class="mut">You type Opening & Closing (bottles) · Used = Open − Close · 🍺 Beer = kegs, not counted</div>
+          <div class="tabbar"><span class="t">Import</span><span class="t on">Inv</span><span class="t">Order</span><span class="t">Tips</span><span class="t">More</span></div>
+        </div></div>
+        <figcaption class="cap"><span class="n">07 ·</span> <b>Inventory.</b> Type opening & closing bottles; Used is automatic — liquor only.</figcaption>
+      </figure>
+
+      <figure>
+        <div class="phone"><div class="notch"></div><div class="scr">
+          <div class="barx"><span>ORDER SHEET</span><span>for Day 3</span></div>
+          <div class="rows">
+            <div class="lrow"><span>Jack Daniel’s <span class="mut">$42 · rec 3</span></span><div class="box"></div></div>
+            <div class="lrow"><span>Tequila <span class="mut">$38 · rec 2</span></span><div class="box"></div></div>
+            <div class="lrow"><span>Triple sec <span class="mut">$16 · rec 1</span></span><div class="box"></div></div>
+            <div class="lrow"><span>Wine (cs) <span class="mut">$96 · rec 2</span></span><div class="box"></div></div>
+          </div>
+          <div class="mut">Recommended = last night used × trend · no beer (kegs)</div>
+          <div class="btn go sm">Review order ▸</div>
+          <div class="tabbar"><span class="t">Import</span><span class="t">Inv</span><span class="t on">Order</span><span class="t">Tips</span><span class="t">More</span></div>
+        </div></div>
+        <figcaption class="cap"><span class="n">08 ·</span> <b>Orders.</b> Liquor catalog + prices + recommended qty.</figcaption>
+      </figure>
+
+      <figure>
+        <div class="phone"><div class="notch"></div><div class="scr">
+          <div class="barx"><span>REVIEW</span><span>Day 3</span></div>
+          <div class="title-sm">Confirm & snap the sheet</div>
+          <div class="rows">
+            <div class="lrow"><span>On hand now</span><span class="v">23</span></div>
+            <div class="lrow"><span>Ordering</span><span class="v">+12</span></div>
+            <div class="lrow"><span>Have tomorrow</span><span class="v" style="color:var(--tan)">35</span></div>
+            <div class="lrow"><span>Order total</span><span class="v">$486</span></div>
+          </div>
+          <div class="ph">📷 attach photo of paper sheet</div>
+          <div class="tabbar"><span class="t">Import</span><span class="t">Inv</span><span class="t on">Order</span><span class="t">Tips</span><span class="t">More</span></div>
+        </div></div>
+        <figcaption class="cap"><span class="n">09 ·</span> <b>Order review.</b> Previous → tomorrow, total $, photo.</figcaption>
+      </figure>
+
+      <figure>
+        <div class="phone"><div class="notch"></div><div class="scr">
+          <div class="barx"><span>RECEIVING</span><span>next AM</span></div>
+          <div class="title-sm">What actually arrived?</div>
+          <div class="rows">
+            <div class="lrow"><span>Jack — ordered 3</span><span class="v">got <b style="color:var(--ink)">3</b></span></div>
+            <div class="lrow"><span>Wine — ordered 2</span><span class="v" style="color:var(--tan)">got 1 ⚠</span></div>
+          </div>
+          <div class="ph">🖼 yesterday’s order-sheet photo</div>
+          <div class="mut">Shortfalls flagged ⚠</div>
+          <div class="tabbar"><span class="t">Import</span><span class="t on">Inv</span><span class="t">Order</span><span class="t">Tips</span><span class="t">More</span></div>
+        </div></div>
+        <figcaption class="cap"><span class="n">10 ·</span> <b>Receiving.</b> Verify vs ordered, with last night’s photo.</figcaption>
+      </figure>
+
+      <figure>
+        <div class="phone"><div class="notch"></div><div class="scr">
+          <div class="barx"><span>TIPS · STA 2</span><span>🔒 admin PIN</span></div>
+          <div class="title-sm">Count the bucket</div>
+          <div class="field">Bucket total $ — <b>type it</b></div>
+          <div class="lrow"><span>Bucket total</span><span class="v">$612</span></div>
+          <div class="lrow"><span>÷ served (Sta 2)</span><span class="v">182</span></div>
+          <div class="lrow"><span>Score / person</span><span class="v" style="color:var(--tan)">$3.36</span></div>
+          <div class="btn sm">Verify ✓ (PIN)</div>
+          <div class="tabbar"><span class="t">Import</span><span class="t">Inv</span><span class="t">Order</span><span class="t on">Tips</span><span class="t">More</span></div>
+        </div></div>
+        <figcaption class="cap"><span class="n">11 ·</span> <b>Tips.</b> Type the bucket total → ÷ served. All to Special Kids Rodeo; PIN-verified.</figcaption>
+      </figure>
+
+      <figure>
+        <div class="phone"><div class="notch"></div><div class="scr">
+          <div class="barx"><span>ANALYTICS</span><span>Day 2</span></div>
+          <div class="title-sm">Funnel & people</div>
+          <div class="rows">
+            <div class="lrow"><span>Line → Ordered → Drinks</span><span class="v">312·248·799</span></div>
+            <div class="lrow"><span>Drinks / person</span><span class="v">3.2</span></div>
+            <div class="lrow"><span>Busy/slow (15-min)</span><span class="v">▁▃▅█▆▃ pk 8:15</span></div>
+            <div class="lrow"><span>Top bartender (tips)</span><span class="v" style="color:var(--tan)">Jane</span></div>
+            <div class="lrow"><span>Fastest mixer</span><span class="v">Tom 4.1/min</span></div>
+            <div class="lrow"><span>Line capacity</span><span class="v">Sta2 ▲ / Sta4 ▼</span></div>
+            <div class="lrow"><span>Shrinkage (liquor)</span><span class="v">−2 btl ⚠</span></div>
+          </div>
+          <div class="tabbar"><span class="t">…</span><span class="t on">Stats</span><span class="t">Boot</span><span class="t">Hist</span><span class="t">Set</span></div>
+        </div></div>
+        <figcaption class="cap"><span class="n">12 ·</span> <b>Analytics.</b> Funnel, 15-min busy/slow, per-bartender tips, mixer speed, line capacity, liquor shrinkage.</figcaption>
+      </figure>
+
+      <figure>
+        <div class="phone"><div class="notch"></div><div class="scr">
+          <div class="barx"><span>TIP TOTALS</span><span>Day 4 of 10</span></div>
+          <div class="title-sm">Fill the Boot — tracker</div>
+          <div class="rows">
+            <div class="lrow"><span>Raised so far</span><span class="v" style="color:var(--tan)">$24,180</span></div>
+            <div class="lrow"><span>Goal (last yr)</span><span class="v">$41,500 · 58%</span></div>
+            <div class="lrow"><span>Day 1</span><span class="v">$5,100</span></div>
+            <div class="lrow"><span>Day 2</span><span class="v">$6,800</span></div>
+            <div class="lrow"><span>Day 3</span><span class="v">$5,980</span></div>
+            <div class="lrow"><span>Day 4 — tonight</span><div class="box"></div></div>
+          </div>
+          <div class="mut">Numbers only — your boot graphic/file renders the visual</div>
+          <div class="tabbar"><span class="t">…</span><span class="t">Stats</span><span class="t on">Boot</span><span class="t">Hist</span><span class="t">Set</span></div>
+        </div></div>
+        <figcaption class="cap"><span class="n">13 ·</span> <b>Fill the Boot — tracker.</b> Per-day + cumulative vs last year. Auto-suggested from the night’s tips, editable.</figcaption>
+      </figure>
+
+      <figure>
+        <div class="phone"><div class="notch"></div><div class="scr">
+          <div class="barx"><span>HISTORY · YOY</span><span>multi-year</span></div>
+          <div class="title-sm">Compare to past years</div>
+          <div class="rows">
+            <div class="lrow"><span>2023 total</span><span class="v">$37,400</span></div>
+            <div class="lrow"><span>2024 total</span><span class="v">$41,500</span></div>
+            <div class="lrow"><span>2025 pace</span><span class="v" style="color:var(--tan)">+4%</span></div>
+          </div>
+          <div class="ph">⤓ import your past-years spreadsheet</div>
+          <div class="btn tan sm">Export tonight’s totals</div>
+        </div></div>
+        <figcaption class="cap"><span class="n">14 ·</span> <b>Year-over-year + export.</b> Loads your past-years sheet to set the goal; exports nightly totals for the boot file.</figcaption>
+      </figure>
+
+      <figure>
+        <div class="phone"><div class="notch"></div><div class="scr">
+          <div class="barx"><span>HISTORY</span><span>10 nights</span></div>
+          <div class="rows">
+            <div class="lrow"><span>Day 1 — Fri</span><span class="v">799 dr · $5.1k</span></div>
+            <div class="lrow"><span>Day 2 — Sat</span><span class="v">812 dr · $6.8k</span></div>
+            <div class="lrow"><span>Day 3 — Sun</span><span class="v">…</span></div>
+          </div>
+          <div class="btn sm">⤓ Backup (export)</div>
+          <div class="btn sm">⤒ Restore (import)</div>
+          <div class="tabbar"><span class="t">…</span><span class="t">Stats</span><span class="t">Boot</span><span class="t on">Hist</span><span class="t">Set</span></div>
+        </div></div>
+        <figcaption class="cap"><span class="n">15 ·</span> <b>History + Backup.</b> Every night saved; export so nothing’s lost.</figcaption>
+      </figure>
+
+      <figure>
+        <div class="phone"><div class="notch"></div><div class="scr">
+          <div class="barx"><span>SETTINGS</span><span>admin</span></div>
+          <div class="rows">
+            <div class="lrow"><span>Number of stations</span><span class="v" style="color:var(--tan)">4</span></div>
+            <div class="lrow"><span>Drinks grid (9)</span><span class="v">edit</span></div>
+            <div class="lrow"><span>Order catalog + prices (liquor)</span><span class="v">edit</span></div>
+            <div class="lrow"><span>Pour & bottle sizes</span><span class="v">shrinkage</span></div>
+            <div class="lrow"><span>Goal / past-year totals</span><span class="v">import</span></div>
+            <div class="lrow"><span>Team text list</span><span class="v">14 #s</span></div>
+            <div class="lrow"><span>Admin PIN</span><span class="v">••••</span></div>
+          </div>
+          <div class="tabbar"><span class="t">…</span><span class="t">Stats</span><span class="t">Boot</span><span class="t">Hist</span><span class="t on">Set</span></div>
+        </div></div>
+        <figcaption class="cap"><span class="n">16 ·</span> <b>Settings.</b> Station count, catalog, prices, pours, goal import, PIN.</figcaption>
+      </figure>
+
+      <figure>
+        <div class="phone"><div class="notch"></div><div class="scr">
+          <div class="barx"><span>FUN STATS</span><span>Day 4</span></div>
+          <div class="title-sm">Superlatives 🏆</div>
+          <div class="rows">
+            <div class="lrow"><span>Drink of the night</span><span class="v" style="color:var(--tan)">Margarita ×312</span></div>
+            <div class="lrow"><span>Power hour (bar-wide)</span><span class="v">8:15–8:30 · 94</span></div>
+            <div class="lrow"><span>Beer vs cocktail</span><span class="v">61% / 39%</span></div>
+            <div class="lrow"><span>Longest streak</span><span class="v">Jane · 9 in a row</span></div>
+            <div class="lrow"><span>Fastest fundraising</span><span class="v">$11/min peak</span></div>
+            <div class="lrow"><span>Best night yet</span><span class="v">+8% vs Day 1</span></div>
+            <div class="lrow"><span>Beat-last-year pace</span><span class="v">by Day 8</span></div>
+          </div>
+          <div class="tabbar"><span class="t">…</span><span class="t on">Stats</span><span class="t">Boot</span><span class="t">Recap</span><span class="t">Set</span></div>
+        </div></div>
+        <figcaption class="cap"><span class="n">17 ·</span> <b>Fun stats.</b> Bragging-rights superlatives — and the raw material for the team text.</figcaption>
+      </figure>
+
+      <figure>
+        <div class="phone"><div class="notch"></div><div class="scr">
+          <div class="barx"><span>TEAM RECAP</span><span>text it out</span></div>
+          <div class="title-sm">Send everyone a recap</div>
+          <div class="barx" style="flex-wrap:wrap;gap:4px"><span class="chip tan">Top 3 tips ✓</span><span class="chip tan">Boot total ✓</span><span class="chip">Drink of night</span><span class="chip">Power hour</span></div>
+          <div class="ph" style="display:block;text-align:left;padding:8px;font-size:9px;line-height:1.45">🤠 Reno Rodeo Bar — Day 4<br>Raised $6,140 tonight! Boot $30,320 (73% of last yr 🔥)<br>🏆 Top tips/person: Jane $3.36<br>🍹 Margarita ran it — 312 made<br>See you tomorrow!</div>
+          <div class="btn tan sm">💬 Open in Messages</div>
+          <div class="btn sm">Copy text</div>
+          <div class="tabbar"><span class="t">…</span><span class="t">Stats</span><span class="t">Boot</span><span class="t on">Recap</span><span class="t">Set</span></div>
+        </div></div>
+        <figcaption class="cap"><span class="n">18 ·</span> <b>Team recap.</b> Pick the stats, it writes the text, then opens your Messages app to your saved team list. SMS works on basic signal even when data’s slow; Copy is the fallback.</figcaption>
+      </figure>
+
+    </div>
+  </section>
+
+  <section class="flow">
+    <h3>End-of-night data flow · zero internet</h3>
+    <div class="flowline">
+      <span class="node">Each person’s phone</span><span class="arr">+</span><span class="node">Door phone</span>
+      <span class="arr">→</span><span class="node">Show QR</span>
+      <span class="arr">→</span><span class="node tan">Manager snaps photo</span>
+      <span class="arr">→</span><span class="node">Merge by station</span>
+      <span class="arr">→</span><span class="node">Tips · Analytics · Boot</span>
+      <span class="arr">→</span><span class="node">Backup file</span>
+    </div>
+  </section>
+
+  <footer>
+    <b>Modeling notes baked into this map —</b> (1) Each phone counts one person’s shift; the manager merges by <b>station + time</b>, so handoffs stitch together without anyone swapping phones. (2) Tips stay a single station bucket (all to the Special Kids Rodeo); per-person numbers are a bragging-rights estimate from each phone’s exact people-served. (3) Beer is excluded from inventory/orders (kegs, auto-restocked); it still appears on the drink grid. (4) Every person-served tap is timestamped, shown in 15- or 30-min blocks. (5) Boot screen tracks numbers only — the visual boot lives in your file. (6) The team recap writes a text from the stats you pick and opens your Messages app — nothing sends automatically. · <b>Wireframe v2.2</b>
+  </footer>
+
+</div>
+</body>
+</html>

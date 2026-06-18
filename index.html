@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#211d1a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Bar Count">
+  <meta name="description" content="Offline bar counting, inventory, tips, and Fill the Boot tracking for the Reno Rodeo.">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="styles.css">
+  <title>Bar Count + Fill the Boot</title>
+</head>
+<body>
+  <main id="app" class="app">
+    <section class="screen">
+      <p class="eyebrow">Reno Rodeo · Special Kids Rodeo</p>
+      <h1 class="h1">Bar Count <span class="amp">+</span> Fill the Boot</h1>
+      <p class="muted">Loading…</p>
+    </section>
+  </main>
+  <noscript><p style="padding:20px">This app needs JavaScript enabled.</p></noscript>
+
+  <!-- Vendored locally — NO CDN. Loaded (classic) before the app module so the globals exist. -->
+  <script src="lib/qrcode.js"></script>
+  <script src="lib/jsqr.js"></script>
+  <script src="lib/xlsx.min.js"></script>
+  <script src="app.js" type="module"></script>
+</body>
+</html>

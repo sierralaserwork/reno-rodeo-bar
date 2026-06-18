@@ -1,0 +1,10 @@
+# OS / editor junk
+.DS_Store
+Thumbs.db
+desktop.ini
+*~
+
+# App backups a user might download into this folder (keep them off the site)
+barcount-backup-*.json
+boot-totals-*.csv
+bar-count-*.xlsx
