@@ -168,8 +168,20 @@ The Team Recap screen (18) keeps **SMS** and **Copy** and adds **Email**:
   door phone adds to the line count instead of overwriting it; a contributor can be removed.
 - **Accurate "−"**: the served and door minus buttons undo the 15-min bucket the last `+1` landed in
   (a `servedTaps`/`taps` stack), not the current clock bucket.
-- **Personal boot meter**: the count screen shows estimated $ raised tonight (people served ×
-  `settings.tipEst`, default $3), with a milestone toast every $100.
+- **Served meter (no $)**: the count screen shows "N served tonight" (people served for this shift's
+  date), with a milestone toast every 50 served. No dollar figures appear to bartenders — tips are
+  tallied for the whole crew after the night.
 - **Pace banner**: manager hub + boot screen show ahead/behind last year and $/night needed to catch up.
 - **Tonight's brief**: a manager-hub card auto-summarizing busiest 15-min, top station, conversion,
   low stock, and pace — each line jumps to its screen.
+
+## 9. Crew polish (v2.5)
+- **Shift-done hype card** (`#/shiftdone`): after a bartender ends a shift, a celebratory card names the
+  **bartender + mixer partnership** and shows the night's served / drinks / longest streak (no dollars),
+  then leads to Show-QR. Move-station still flows straight back to counting.
+- **Keep-screen-awake**: the count and door screens hold a Screen Wake Lock (re-acquired on
+  visibility change) so phones don't sleep mid-rush; silently no-ops where unsupported.
+- **End-of-night closeout** (`#/m/closeout`): a 5-item checklist — phones imported (from the coverage
+  board), tips entered, boot confirmed, backup exported today, recap sent today — each jumping to its
+  screen, with inline "Export backup" / "Open recap". `lastBackupAt`/`lastRecapAt` timestamps drive the
+  checks.

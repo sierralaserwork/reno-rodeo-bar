@@ -176,7 +176,6 @@ function defaultState() {
       drinks: DRINKS.slice(),
       drinkPrices: DRINK_PRICES.slice(),
       beer: BEER_DEFAULT.slice(),
-      tipEst: 3,           // assumed $ raised per person served (live boot meter)
       catalog: CATALOG_DEFAULT.map((c) => ({ ...c })),
       pours: POURS_DEFAULT.map((p) => ({ ...p })),
       pourMap: JSON.parse(JSON.stringify(POUR_MAP_DEFAULT)),
@@ -214,7 +213,7 @@ function migrate(s) {
     if (Array.isArray(day.tips)) { for (let i = day.tips.length; i < out.settings.numStations; i++) day.tips.push({ station: i + 1, bucketTotal: 0, verified: false, verifiedBy: '' }); }
   });
   out.myShifts = Array.isArray(s.myShifts) ? s.myShifts : [];
-  out.myShifts.forEach((sh) => { if (!Array.isArray(sh.servedTaps)) sh.servedTaps = []; });
+  out.myShifts.forEach((sh) => { if (!Array.isArray(sh.servedTaps)) sh.servedTaps = []; if (typeof sh.date !== 'string') sh.date = ''; });
   out.myDoor = Object.assign({ buckets: {}, total: 0, taps: [] }, s.myDoor || {});
   if (!Array.isArray(out.myDoor.taps)) out.myDoor.taps = [];
   return out;
@@ -303,6 +302,24 @@ function confirmSheet(title, msg, okLabel, cb) {
   w.querySelector('#ck').onclick = () => { closeSheet(); cb && cb(); };
 }
 
+/* Keep the screen awake on the counting screens (no network; graceful where unsupported). */
+let wantWake = false, wakeLock = null, wakeReq = false;
+async function acquireWake() {
+  if (!wantWake || wakeLock || wakeReq) return;                 // latch: only one request in flight
+  if (!('wakeLock' in navigator) || document.visibilityState !== 'visible') return;
+  wakeReq = true;
+  try {
+    const lock = await navigator.wakeLock.request('screen');
+    // we may have navigated away (wantWake=false) while the request was pending — don't keep a stale lock
+    if (!wantWake || document.visibilityState !== 'visible') { try { lock.release(); } catch (e) {} return; }
+    wakeLock = lock;
+    wakeLock.addEventListener('release', () => { wakeLock = null; });
+  } catch (e) { /* unsupported or denied — fine */ }
+  finally { wakeReq = false; }
+}
+function releaseWake() { try { if (wakeLock) { wakeLock.release(); wakeLock = null; } } catch (e) {} }
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') acquireWake(); });
+
 /* ---------------------------------------------------------------------------
  * 3. Router
  * ------------------------------------------------------------------------- */
@@ -328,6 +345,7 @@ function gateManager(root) {
 }
 function render() {
   closeSheet();
+  wantWake = false; releaseWake(); // counting screens re-enable it below
   const root = app(); root.innerHTML = '';
   const hash = location.hash || '';
   // Role gate — an unset role goes to the picker, EXCEPT the public join landing (#/join),
@@ -448,6 +466,7 @@ function shiftTotal(sh) { return sum(sh.drinks); }
 function renderCount(root) {
   const sh = activeShift();
   if (!sh) return go('#/start');
+  wantWake = true; acquireWake();
   const D = S.settings.drinks;
   const cells = D.map((name, i) => `
     <button class="cell" data-i="${i}">
@@ -489,22 +508,23 @@ function renderCount(root) {
   const refreshDrink = (i) => { root.querySelector(`[data-c="${i}"]`).textContent = sh.drinks[i]; $('#stot').textContent = shiftTotal(sh); };
   if (!Array.isArray(sh.servedTaps)) sh.servedTaps = [];
 
-  // Personal boot meter — estimated $ raised TONIGHT (this shift's date) from people served.
+  // Personal progress meter — people served TONIGHT (no $; tips are tallied after the night).
+  const STEP = 50;
   const tonight = sh.date || todayISO();
   if (S.device.bootMilestoneDate !== tonight) { S.device.bootMilestone = 0; S.device.bootMilestoneDate = tonight; }
-  const myServedTonight = () => sum(S.myShifts.filter((s) => (s.date || tonight) === tonight).map((s) => s.served || 0));
+  const myServedTonight = () => sum(S.myShifts.filter((s) => s.date === tonight).map((s) => s.served || 0));
   const refreshBoot = () => {
-    const raised = myServedTonight() * (S.settings.tipEst || 0);
-    $('#bsLbl').textContent = `~${usd(raised)} for the kids 🤠`;
-    $('#bsFill').style.width = ((raised % 100) / 100 * 100).toFixed(0) + '%';
+    const n = myServedTonight();
+    $('#bsLbl').textContent = `${n} served tonight 🤠`;
+    $('#bsFill').style.width = ((n % STEP) / STEP * 100).toFixed(0) + '%';
   };
 
   $('#sPlus').onclick = () => {
     sh.served++; const b = bucketOf(nowMin()); sh.buckets[b] = (sh.buckets[b] || 0) + 1; sh.servedTaps.push(b);
     refreshServed(); refreshBoot();
-    // milestone toast every $100 raised tonight
-    const m = Math.floor(myServedTonight() * (S.settings.tipEst || 0) / 100);
-    if (m > (S.device.bootMilestone || 0)) { S.device.bootMilestone = m; toast(`🤠 ~${usd(m * 100)} raised for the kids!`); }
+    // milestone toast every 50 served tonight
+    const m = Math.floor(myServedTonight() / STEP);
+    if (m > (S.device.bootMilestone || 0)) { S.device.bootMilestone = m; toast(`🤠 ${m * STEP} served tonight — keep it up!`); }
     save();
   };
   $('#sMinus').onclick = () => {
@@ -577,7 +597,7 @@ function renderEndMove(root) {
     <button class="btn" id="move">Move to another station</button>
     <button class="btn ghost" id="cancel">Cancel</button>
   </section>`;
-  root.querySelector('#end').onclick = () => { sh.end = nowMin(); sh.active = false; save(); store.checkpoint(); go('#/qr'); };
+  root.querySelector('#end').onclick = () => { sh.end = nowMin(); sh.active = false; save(); store.checkpoint(); go('#/shiftdone'); };
   root.querySelector('#move').onclick = () => {
     const ns = S.settings.numStations;
     const segs = Array.from({ length: ns }, (_, i) => `<button class="s" data-st="${i + 1}">${i + 1}</button>`).join('');
@@ -597,6 +617,42 @@ function renderEndMove(root) {
   root.querySelector('#cancel').onclick = () => go('#/count');
 }
 route('#/endmove', renderEndMove);
+
+/* Hype card shown after ending a shift — celebrates the bartender + mixer partnership.
+   No dollars: tips are tallied for the whole crew after the night. */
+function renderShiftDone(root) {
+  const ended = S.myShifts[S.myShifts.length - 1];
+  if (!ended) return go('#/start');
+  const day = ended.date || todayISO();
+  const todayShifts = S.myShifts.filter((s) => (s.date || day) === day);
+  const served = sum(todayShifts.map((s) => s.served || 0));
+  const drinks = sum(todayShifts.map((s) => sum(s.drinks || [])));
+  const streak = todayShifts.reduce((m, s) => Math.max(m, s.streak || 0), 0);
+  // duration across all of tonight's shifts (matches the served/drinks scope after a station move)
+  const mins = sum(todayShifts.map((s) => (s.end != null ? s.end : nowMin()) - s.start));
+  const dur = mins > 0 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : '';
+  const who = ended.mixer ? `${esc(S.device.name)} &amp; ${esc(ended.mixer)}` : esc(S.device.name);
+  root.innerHTML = `
+  <section class="screen shiftdone">
+    <div class="barx"><span class="mono">SHIFT DONE</span><span class="mono">${minToLabel(nowMin())}</span></div>
+    <div class="hype">
+      <div class="hype-emoji">🤠🎉</div>
+      <h1 class="h1">Great shift,<br>${who}!</h1>
+      <p class="muted">Station ${ended.station}${ended.mixer ? ' · bartender + mixer' : ''}${dur ? ' · ' + dur : ''}</p>
+      <div class="hype-stats">
+        <div class="hs"><div class="hn">${served}</div><div class="hl">served</div></div>
+        <div class="hs"><div class="hn">${drinks}</div><div class="hl">drinks</div></div>
+        <div class="hs"><div class="hn">${streak}</div><div class="hl">best streak</div></div>
+      </div>
+      <p class="muted center small">You two are a team — this is your night's tally. Tips are counted for the whole crew after close. 🙌</p>
+    </div>
+    <button class="btn btn--go big" id="toqr">Show QR for the manager →</button>
+    <button class="btn ghost" id="again">Start another shift</button>
+  </section>`;
+  root.querySelector('#toqr').onclick = () => go('#/qr');
+  root.querySelector('#again').onclick = () => go('#/start');
+}
+route('#/shiftdone', renderShiftDone);
 
 /* ---------- QR payload (compact) ---------- */
 // Integrity checksum — recomputed on import to reject a garbled/partial scan.
@@ -655,6 +711,7 @@ route('#/qr', renderQR);
 function renderDoor(root) {
   const d = S.myDoor;
   if (!Array.isArray(d.taps)) d.taps = [];
+  wantWake = true; acquireWake();
   root.innerHTML = `
   <section class="screen door">
     <div class="topbar"><span class="mono">DOOR · LINE</span><span class="mono">OFFLINE ✓</span></div>
@@ -838,6 +895,7 @@ function renderManagerHub(root) {
     ['#/m/boot', '🥾', 'Fill the Boot', 'Per-day vs goal'],
     ['#/m/yoy', '📊', 'Year-over-year', 'Import goal + export'],
     ['#/m/recap', '💬', 'Team Recap', 'SMS · Email · Copy'],
+    ['#/m/closeout', '✅', 'End of Night', 'Closeout checklist'],
     ['#/m/excel', '📑', 'Excel Export', 'Refreshed .xlsx'],
     ['#/m/history', '🗂', 'History + Backup', 'Save / restore'],
     ['#/m/settings', '⚙️', 'Settings', 'Stations, catalog, PIN'],
@@ -1617,6 +1675,7 @@ async function exportBackup() {
   const photos = await photoDB.all();
   const backup = { app: 'bar-count', schema: 2, exportedAt: new Date().toISOString(), state: stateSnap, photos };
   downloadBlob(new Blob([JSON.stringify(backup)], { type: 'application/json' }), `barcount-backup-${todayISO()}.json`);
+  S.lastBackupAt = new Date().toISOString(); save();
   toast('Backup downloaded');
 }
 
@@ -1662,7 +1721,6 @@ function renderSettings(root) {
       <label class="inp-lbl">Number of nights</label><input class="inp" id="sNights" type="number" min="1" value="${st.nights}">
       <label class="inp-lbl">Boot goal $ (beat last year)</label><input class="inp" id="sGoal" type="number" value="${st.boot.goal}">
       <label class="inp-lbl">Cause</label><input class="inp" id="sCause" value="${esc(st.boot.cause)}">
-      <label class="inp-lbl">Boot-meter est. $ per person served</label><input class="inp" id="sTipEst" type="number" inputmode="decimal" value="${st.tipEst}">
     </div>
     <div class="set-grp">
       <div class="lbl">9-drink grid (comma-separated)</div>
@@ -1699,7 +1757,6 @@ function renderSettings(root) {
     st.nights = Math.max(1, Number(root.querySelector('#sNights').value) || 10);
     st.boot.goal = Number(root.querySelector('#sGoal').value) || 0;
     st.boot.cause = root.querySelector('#sCause').value.trim() || st.boot.cause;
-    st.tipEst = Number(root.querySelector('#sTipEst').value) || 0;
     const drinks = root.querySelector('#sDrinks').value.split(',').map((s) => s.trim()).filter(Boolean);
     if (drinks.length) st.drinks = drinks;
     st.drinkPrices = root.querySelector('#sPrices').value.split(',').map((s) => Number(s.trim()) || 0);
@@ -1749,16 +1806,61 @@ function renderRecap(root) {
     <p class="muted small">Composing works offline. SMS sends on basic signal; <b>email needs internet</b> — your mail app sends when connected. Nothing auto-sends.</p>`;
   root.innerHTML = managerShell('more', 'Team Recap · Day ' + d.day, inner);
   wireShell(root);
+  const markRecap = () => { S.lastRecapAt = new Date().toISOString(); save(); };
   root.querySelectorAll('[data-o]').forEach((b) => b.onclick = () => { recapOpts[b.dataset.o] = !recapOpts[b.dataset.o]; render(); });
-  root.querySelector('#copy').onclick = () => copyText(text);
+  root.querySelector('#copy').onclick = () => { copyText(text); markRecap(); };
   root.querySelector('#sms').onclick = () => {
     const recips = S.settings.teamPhones.join(',');
     const sep = isIOS() ? '&' : '?';
+    markRecap();
     location.href = `sms:${recips}${sep}body=${encodeURIComponent(text)}`;
   };
-  root.querySelector('#email').onclick = () => emailRecap(d, text);
+  root.querySelector('#email').onclick = () => { markRecap(); emailRecap(d, text); };
 }
 route('#/m/recap', renderRecap);
+
+/* End-of-night closeout checklist (idea #6) — turns scattered steps into one flow. */
+// Compare on the LOCAL calendar (timestamps are stored as UTC ISO; todayISO() is local).
+function isToday(iso) {
+  if (!iso) return false;
+  const d = new Date(iso); if (isNaN(d)) return false;
+  const local = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  return local === todayISO();
+}
+function renderCloseout(root) {
+  ensureDay();
+  const d = currentDay();
+  const agg = stationAgg(d);
+  const stationsStaffed = Object.values(agg).filter((s) => s.shifts.length > 0).length;
+  const doorIn = !!(d.door && d.door.total > 0);
+  const staffed = Object.values(agg).filter((s) => s.served > 0);
+  const tipsNeeded = staffed.filter((s) => !(((d.tips || []).find((t) => t.station === s.station) || {}).bucketTotal > 0)).map((s) => s.station);
+  const tipsOK = staffed.length > 0 && tipsNeeded.length === 0;
+  const bootOK = bootForDay(d) > 0;
+  const backupOK = isToday(S.lastBackupAt);
+  const recapOK = isToday(S.lastRecapAt);
+  const done = [stationsStaffed > 0 && doorIn, tipsOK, bootOK, backupOK, recapOK].filter(Boolean).length;
+  const item = (ok, label, detail, hash, btn) => `<div class="co-row"><span class="co-ck ${ok ? 'on' : ''}">${ok ? '✓' : '▢'}</span><span class="co-main"><b>${esc(label)}</b><span class="mut">${esc(detail)}</span></span>${hash ? `<button class="chip" data-co="${hash}">${esc(btn || 'Open')}</button>` : ''}</div>`;
+  const inner = `
+    <h2 class="title-sm">End of night — Day ${d.day}</h2>
+    <p class="muted">Run this before everyone leaves. ${done}/5 done.</p>
+    <div class="co-list">
+      ${item(stationsStaffed > 0 && doorIn, 'All phones imported', `${stationsStaffed} station${stationsStaffed === 1 ? '' : 's'} + ${doorIn ? 'door' : 'NO door yet'}`, '#/m/import', 'Import')}
+      ${item(tipsOK, 'Tips entered', tipsNeeded.length ? `Sta ${tipsNeeded.join(', ')} still need a bucket` : 'all served stations have a bucket', '#/m/tips', 'Tips')}
+      ${item(bootOK, 'Boot confirmed', bootOK ? usd(bootForDay(d)) + ' tonight' : 'no amount yet', '#/m/boot', 'Boot')}
+      ${item(backupOK, 'Backup exported', backupOK ? 'done today' : 'not today', null)}
+      ${item(recapOK, 'Recap sent', recapOK ? 'done today' : 'not yet', '#/m/recap', 'Recap')}
+    </div>
+    <button class="btn btn--tan" id="coBackup">⤓ Export backup now</button>
+    <button class="btn btn--go" id="coRecap">💬 Open team recap</button>
+    <p class="muted small">Tips are counted for the whole crew after close — that's why this is the last stop.</p>`;
+  root.innerHTML = managerShell('more', 'End of Night', inner);
+  wireShell(root);
+  root.querySelectorAll('[data-co]').forEach((b) => b.onclick = () => go(b.dataset.co));
+  root.querySelector('#coBackup').onclick = () => exportBackup().then(() => render());
+  root.querySelector('#coRecap').onclick = () => go('#/m/recap');
+}
+route('#/m/closeout', renderCloseout);
 
 async function emailRecap(day, text) {
   const subject = `${S.settings.event} Bar — Day ${day.day} recap`;

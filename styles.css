@@ -143,6 +143,24 @@ code{font-family:var(--mono);background:var(--tan-wash);padding:1px 5px;border-r
 .hc-ti{font-weight:800;font-size:14px}
 .hc-su{font-family:var(--mono);font-size:10px;color:var(--ink-2)}
 
+/* ---- shift-done hype card ---- */
+.shiftdone{min-height:100dvh;justify-content:center;gap:16px}
+.hype{border:2px solid var(--ink);border-radius:var(--radius);background:var(--tan-wash);padding:20px;text-align:center;display:flex;flex-direction:column;gap:10px}
+.hype-emoji{font-size:40px}
+.hype-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:4px}
+.hs{border:2px solid var(--ink);border-radius:12px;background:var(--paper);padding:10px 4px}
+.hs .hn{font-size:26px;font-weight:800;letter-spacing:-.02em}
+.hs .hl{font-family:var(--mono);font-size:9px;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-2)}
+
+/* ---- closeout checklist ---- */
+.co-list{display:flex;flex-direction:column;gap:8px}
+.co-row{display:flex;align-items:center;gap:10px;border:2px solid var(--line);border-radius:12px;padding:10px 12px;background:var(--paper)}
+.co-ck{width:26px;height:26px;flex:none;border-radius:50%;border:2px solid var(--line);display:grid;place-items:center;font-weight:800;color:var(--ink-2)}
+.co-ck.on{border-color:var(--ok);color:#fff;background:var(--ok)}
+.co-main{flex:1;display:flex;flex-direction:column;min-width:0}
+.co-main b{font-size:14px}
+.co-main .mut{font-size:11px}
+
 /* ---- pace banner + tonight's brief ---- */
 .pace{border:2px solid var(--ink);border-radius:var(--radius);padding:10px 12px;font-weight:700;font-size:14px}
 .pace.ahead{background:#e8f3ec;border-color:var(--ok);color:var(--ok)}
